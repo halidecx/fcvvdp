@@ -1,0 +1,12 @@
+.{
+    .name = .fcvvdp,
+    .version = "0.0.0",
+    .fingerprint = 0xfe41744458a5e60e,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "third-party",
+    },
+}
