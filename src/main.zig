@@ -124,12 +124,15 @@ fn displayModelName(model: c.cvvdp_display_model_t) []const u8 {
     };
 }
 
-fn printUsage(program_name: []const u8) void {
+fn printUsage() void {
     print(
-        \\ fcvvdp by Halide Compression, LLC | {s}
-        \\ Usage: {s} <reference.png> <distorted.png> [options]
-        \\ Compare two PNG images using the CVVDP perceptual quality metric
-        \\ options:
+        \\fcvvdp | {s}
+        \\
+        \\usage: fcvvdp [options] <reference.png> <distorted.png>
+        \\
+        \\compare two PNG images using the CVVDP perceptual quality metric
+        \\
+        \\options:
         \\  -m, --model <name>
         \\      display model to use (fhd, 4k, hdr_pq, hdr_hlg, hdr_linear,
         \\      hdr_dark, hdr_zoom); default: fhd
@@ -139,8 +142,9 @@ fn printUsage(program_name: []const u8) void {
         \\      output result as JSON
         \\  -h, --help
         \\      show this help message
+        \\
     , .{
-        c.cvvdp_version_string(), program_name,
+        c.cvvdp_version_string(),
     });
 }
 
@@ -150,7 +154,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     var args = std.process.args();
-    const program_name = args.next().?;
+    _ = args.next();
 
     var ref_filename: ?[]const u8 = null;
     var dis_filename: ?[]const u8 = null;
@@ -161,7 +165,7 @@ pub fn main() !void {
     // Parse arguments
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            printUsage(program_name);
+            printUsage();
             return;
         } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--verbose")) {
             verbose = true;
@@ -172,7 +176,7 @@ pub fn main() !void {
                 display_model = parseDisplayModel(model_arg);
             } else {
                 print("Error: Missing argument for --model\n", .{});
-                printUsage(program_name);
+                printUsage();
                 return error.InvalidArguments;
             }
         } else if (arg[0] != '-') {
@@ -186,14 +190,14 @@ pub fn main() !void {
             }
         } else {
             print("Error: Unknown option '{s}'\n", .{arg});
-            printUsage(program_name);
+            printUsage();
             return error.UnknownOption;
         }
     }
 
     if (ref_filename == null or dis_filename == null) {
         print("Error: Two input PNG files are required\n", .{});
-        printUsage(program_name);
+        printUsage();
         return error.MissingFiles;
     }
 
