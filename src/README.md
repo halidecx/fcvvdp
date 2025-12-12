@@ -96,7 +96,7 @@ gcc -O2 -std=c99 -o cvvdp_png_compare cvvdp_png_compare.c -L. -lcvvdp -lpng -lm
 #include "cvvdp.h"
 
 // Single image comparison
-cvvdp_image_t reference = {
+FcvvdpImage reference = {
     .data = ref_pixels,
     .width = 1920,
     .height = 1080,
@@ -105,7 +105,7 @@ cvvdp_image_t reference = {
     .colorspace = CVVDP_COLORSPACE_SRGB
 };
 
-cvvdp_image_t distorted = {
+FcvvdpImage distorted = {
     .data = dis_pixels,
     .width = 1920,
     .height = 1080,
@@ -114,8 +114,8 @@ cvvdp_image_t distorted = {
     .colorspace = CVVDP_COLORSPACE_SRGB
 };
 
-cvvdp_result_t result;
-cvvdp_error_t err = cvvdp_compare_images(&reference, &distorted,
+FcvvdpResult result;
+FcvvdpError err = cvvdp_compare_images(&reference, &distorted,
                                           CVVDP_DISPLAY_STANDARD_FHD,
                                           NULL, &result);
 
@@ -128,19 +128,19 @@ if (err == CVVDP_OK) {
 
 ```c
 // Create context for video processing
-cvvdp_context_t* ctx;
-cvvdp_error_t err = cvvdp_create(1920, 1080, 30.0f, // width, height, fps
+FcvvdpCtx* ctx;
+FcvvdpError err = cvvdp_create(1920, 1080, 30.0f, // width, height, fps
                                   CVVDP_DISPLAY_STANDARD_FHD,
                                   NULL, &ctx);
 
 // Process each frame
 for (int frame = 0; frame < num_frames; frame++) {
-    cvvdp_image_t ref_frame = /* load reference frame */;
-    cvvdp_image_t dis_frame = /* load distorted frame */;
-    
-    cvvdp_result_t result;
+    FcvvdpImage ref_frame = /* load reference frame */;
+    FcvvdpImage dis_frame = /* load distorted frame */;
+
+    FcvvdpResult result;
     cvvdp_process_frame(ctx, &ref_frame, &dis_frame, &result);
-    
+
     // result.jod contains cumulative score up to this frame
     // Only the final frame's score should be used for video
 }
@@ -174,7 +174,7 @@ The library supports several input pixel formats:
 ## Custom Display Parameters
 
 ```c
-cvvdp_display_params_t custom = {
+FcvvdpDisplayParams custom = {
     .resolution_width = 3840,
     .resolution_height = 2160,
     .viewing_distance_meters = 0.8f,
@@ -183,10 +183,10 @@ cvvdp_display_params_t custom = {
     .contrast = 2000.0f,
     .ambient_light = 100.0f,
     .reflectivity = 0.01f,
-    .is_hdr = 0
+    .is_hdr = false
 };
 
-cvvdp_result_t result;
+FcvvdpResult result;
 cvvdp_compare_images(&ref, &dis, CVVDP_DISPLAY_CUSTOM, &custom, &result);
 ```
 

@@ -92,7 +92,7 @@ pub fn toRGB8(allocator: std.mem.Allocator, img: Image) ![]u8 {
     return rgb;
 }
 
-fn parseDisplayModel(name: []const u8) c.cvvdp_display_model_t {
+fn parseDisplayModel(name: []const u8) c.FcvvdpDisplayModel {
     if (std.mem.eql(u8, name, "fhd")) {
         return c.CVVDP_DISPLAY_STANDARD_FHD;
     } else if (std.mem.eql(u8, name, "4k")) {
@@ -111,7 +111,7 @@ fn parseDisplayModel(name: []const u8) c.cvvdp_display_model_t {
     return c.CVVDP_DISPLAY_STANDARD_FHD; // default
 }
 
-fn displayModelName(model: c.cvvdp_display_model_t) []const u8 {
+fn displayModelName(model: c.FcvvdpDisplayModel) []const u8 {
     return switch (model) {
         c.CVVDP_DISPLAY_STANDARD_FHD => "Standard FHD (24\", 200 cd/m², office lighting)",
         c.CVVDP_DISPLAY_STANDARD_4K => "Standard 4K (30\", 200 cd/m², office lighting)",
@@ -237,7 +237,7 @@ pub fn main() !void {
     }
 
     // Set up CVVDP image descriptors
-    var ref_cvvdp = c.cvvdp_image_t{
+    var ref_cvvdp = c.FcvvdpImage{
         .data = ref_rgb.ptr,
         .width = @intCast(ref_img.width),
         .height = @intCast(ref_img.height),
@@ -246,7 +246,7 @@ pub fn main() !void {
         .colorspace = c.CVVDP_COLORSPACE_SRGB,
     };
 
-    var dis_cvvdp = c.cvvdp_image_t{
+    var dis_cvvdp = c.FcvvdpImage{
         .data = dis_rgb.ptr,
         .width = @intCast(dis_img.width),
         .height = @intCast(dis_img.height),
@@ -260,7 +260,7 @@ pub fn main() !void {
         print("Computing CVVDP metric...\n", .{});
     }
 
-    var result: c.cvvdp_result_t = undefined;
+    var result: c.FcvvdpResult = undefined;
     const err = c.cvvdp_compare_images(&ref_cvvdp, &dis_cvvdp, display_model, null, &result);
 
     if (err != c.CVVDP_OK) {
