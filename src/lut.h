@@ -84,7 +84,7 @@ static const float CVVDP_BASEBAND_WEIGHT[4] = {
     25.25969886779785f
 };
 
-static const float L_bkg[32] = {
+static const float L_BKG[32] = {
     0.0049999999999999992,
     0.0079841564144528827,
     0.01274935073008982,
@@ -119,7 +119,7 @@ static const float L_bkg[32] = {
     10000,
 };
 
-static const float rho[32] = {
+static const float RHO[32] = {
     0.1,
     0.12317481953148776,
     0.15172036166614578,

@@ -89,9 +89,6 @@ typedef struct PyramidLvl {
 
     // 4 channels per level
     float* data[4];
-
-    // background luminance
-    float* L_bkg;
 } PyramidLvl;
 
 // laplacian pyramid

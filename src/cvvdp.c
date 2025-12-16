@@ -608,11 +608,11 @@ FcvvdpError cvvdp_csf_init(Csf* const csf,
     csf->num_bands = cvvdp_get_band_frequencies(width, height, ppd, freqs);
 
     for (int i = 0; i < CVVDP_LUT_SIZE; i++)
-        csf->log_L_bkg[i] = log10f(L_bkg[i]);
+        csf->log_L_bkg[i] = log10f(L_BKG[i]);
 
     float log_rho[CVVDP_LUT_SIZE];
     for (int i = 0; i < CVVDP_LUT_SIZE; i++)
-        log_rho[i] = log10f(rho[i]);
+        log_rho[i] = log10f(RHO[i]);
 
     csf->log_S_LUT = cvvdp_alloc_float(csf->num_bands * 4 * CVVDP_LUT_SIZE);
     if (!csf->log_S_LUT) return CVVDP_ERROR_OUT_OF_MEMORY;
