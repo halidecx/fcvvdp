@@ -37,7 +37,7 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
     if (c.spng_get_ihdr(ctx, &ihdr) != 0)
         return error.GetHeaderFailed;
 
-    // Always decode to RGBA8 for simplicity
+    // always decode to RGBA8
     const fmt: c_int = c.SPNG_FMT_RGBA8;
     var out_size: usize = 0;
     if (c.spng_decoded_image_size(ctx, fmt, &out_size) != 0) return error.ImageSizeFailed;
@@ -66,20 +66,17 @@ pub fn toRGB8(allocator: std.mem.Allocator, img: Image) ![]u8 {
     const rgb = try allocator.alloc(u8, pixels * 3);
 
     switch (img.channels) {
-        3 => {
-            // direct copy
+        3 => { // direct copy
             @memcpy(rgb, img.data);
         },
-        4 => {
-            // strip alpha
+        4 => { // strip alpha
             for (0..pixels) |i| {
                 rgb[i * 3 + 0] = img.data[i * 4 + 0];
                 rgb[i * 3 + 1] = img.data[i * 4 + 1];
                 rgb[i * 3 + 2] = img.data[i * 4 + 2];
             }
         },
-        1 => {
-            // grayscale to RGB
+        1 => { // grayscale to RGB
             for (0..pixels) |i| {
                 const g = img.data[i];
                 rgb[i * 3 + 0] = g;
@@ -162,29 +159,28 @@ pub fn main() !void {
     var verbose = false;
     var json_output = false;
 
-    // Parse arguments
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             printUsage();
             return;
-        } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--verbose")) {
-            verbose = true;
-        } else if (std.mem.eql(u8, arg, "-j") or std.mem.eql(u8, arg, "--json")) {
-            json_output = true;
-        } else if ((std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--model"))) {
-            if (args.next()) |model_arg| {
-                display_model = parseDisplayModel(model_arg);
-            } else {
+        } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--verbose"))
+            verbose = true
+        else if (std.mem.eql(u8, arg, "-j") or std.mem.eql(u8, arg, "--json"))
+            json_output = true
+        else if ((std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--model"))) {
+            if (args.next()) |model_arg|
+                display_model = parseDisplayModel(model_arg)
+            else {
                 print("Error: Missing argument for --model\n", .{});
                 printUsage();
                 return error.InvalidArguments;
             }
         } else if (arg[0] != '-') {
-            if (ref_filename == null) {
-                ref_filename = arg;
-            } else if (dis_filename == null) {
-                dis_filename = arg;
-            } else {
+            if (ref_filename == null)
+                ref_filename = arg
+            else if (dis_filename == null)
+                dis_filename = arg
+            else {
                 print("Error: Too many input files specified\n", .{});
                 return error.TooManyFiles;
             }
@@ -201,22 +197,18 @@ pub fn main() !void {
         return error.MissingFiles;
     }
 
-    // Load images
-    if (verbose and !json_output) {
+    if (verbose and !json_output)
         print("Loading reference: {s}\n", .{ref_filename.?});
-    }
 
     var ref_img = try loadPNG(allocator, ref_filename.?);
     defer ref_img.deinit(allocator);
 
-    if (verbose and !json_output) {
+    if (verbose and !json_output)
         print("Loading distorted: {s}\n", .{dis_filename.?});
-    }
 
     var dis_img = try loadPNG(allocator, dis_filename.?);
     defer dis_img.deinit(allocator);
 
-    // Check dimensions match
     if (ref_img.width != dis_img.width or ref_img.height != dis_img.height) {
         print("Error: Image dimensions do not match\n", .{});
         print("  Reference: {d}x{d}\n", .{ ref_img.width, ref_img.height });
@@ -224,7 +216,6 @@ pub fn main() !void {
         return error.DimensionMismatch;
     }
 
-    // Convert to RGB8 for CVVDP
     const ref_rgb = try toRGB8(allocator, ref_img);
     defer allocator.free(ref_rgb);
 
@@ -236,7 +227,6 @@ pub fn main() !void {
         print("Display model: {s}\n", .{displayModelName(display_model)});
     }
 
-    // Set up CVVDP image descriptors
     var ref_cvvdp = c.FcvvdpImage{
         .data = ref_rgb.ptr,
         .width = @intCast(ref_img.width),
@@ -255,10 +245,8 @@ pub fn main() !void {
         .colorspace = c.CVVDP_COLORSPACE_SRGB,
     };
 
-    // Run CVVDP comparison
-    if (verbose and !json_output) {
+    if (verbose and !json_output)
         print("Computing CVVDP metric...\n", .{});
-    }
 
     var result: c.FcvvdpResult = undefined;
     const err = c.cvvdp_compare_images(&ref_cvvdp, &dis_cvvdp, display_model, null, &result);
@@ -268,7 +256,6 @@ pub fn main() !void {
         return error.CVVDPError;
     }
 
-    // Output results
     if (json_output) {
         print(
             \\{{
@@ -288,25 +275,21 @@ pub fn main() !void {
             print("  Quality (Q):  {d:.4}\n", .{result.quality});
             print("\n", .{});
 
-            // Interpret the score
             print("Interpretation: ", .{});
-            if (result.jod >= 9.5) {
-                print("Images are virtually identical\n", .{});
-            } else if (result.jod >= 9.0) {
-                print("Barely visible difference\n", .{});
-            } else if (result.jod >= 8.0) {
-                print("Slight visible difference\n", .{});
-            } else if (result.jod >= 7.0) {
-                print("Noticeable but acceptable difference\n", .{});
-            } else if (result.jod >= 5.0) {
-                print("Clearly visible, somewhat annoying difference\n", .{});
-            } else if (result.jod >= 3.0) {
-                print("Very visible, annoying difference\n", .{});
-            } else {
+            if (result.jod >= 9.5)
+                print("Images are virtually identical\n", .{})
+            else if (result.jod >= 9.0)
+                print("Barely visible difference\n", .{})
+            else if (result.jod >= 8.0)
+                print("Slight visible difference\n", .{})
+            else if (result.jod >= 7.0)
+                print("Noticeable but acceptable difference\n", .{})
+            else if (result.jod >= 5.0)
+                print("Clearly visible, somewhat annoying difference\n", .{})
+            else if (result.jod >= 3.0)
+                print("Very visible, annoying difference\n", .{})
+            else
                 print("Large, unacceptable difference\n", .{});
-            }
-        } else {
-            print("JOD: {d:.4}\n", .{result.jod});
-        }
+        } else print("JOD: {d:.4}\n", .{result.jod});
     }
 }
