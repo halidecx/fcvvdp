@@ -13,6 +13,7 @@
 #define CVVDP_LUT_SIZE 32 // CSF LUT size
 #define CVVDP_GAUSSIAN_SIZE 8 // gaussian kernel size
 #define CVVDP_NUM_CHANNELS 4 // number of color channels
+#define CVVDP_GAUSSIAN_SIZE 8 // Gaussian blur radius
 
 static const float GAUSS_PYR_KERNEL[5] = {
     0.25f - 0.4f/2.0f, 0.25f, 0.4f, 0.25f, 0.25f - 0.4f/2.0f

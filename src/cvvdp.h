@@ -1,6 +1,6 @@
 // © 2025 Halide Compression, LLC. All Rights Reserved.
-#ifndef CVVDP_H
-#define CVVDP_H
+#ifndef FCVVDP_H
+#define FCVVDP_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -119,7 +119,7 @@ typedef struct FcvvdpResult {
     double quality;
 } FcvvdpResult;
 
-/*
+/**
  * Create a new CVVDP context
  *
  * @param width         Image width in pixels
@@ -127,56 +127,54 @@ typedef struct FcvvdpResult {
  * @param fps           Frames per second (use 0 for single images)
  * @param display_model Display model preset
  * @param custom_params Custom display parameters (if CVVDP_DISPLAY_CUSTOM)
- * @param out_ctx       Output pointer to created context
+ * @param out_c         Output pointer to created context
  *
  * @return CVVDP_OK on success, error code otherwise
  */
- FcvvdpError cvvdp_create(const int width,
-                          const int height,
-                          const float fps,
-                          const FcvvdpDisplayModel display_model,
-                          const FcvvdpDisplayParams* const custom_params,
-                          FcvvdpCtx** const out_ctx);
+FcvvdpError cvvdp_create(const int width,
+                         const int height,
+                         const float fps,
+                         const FcvvdpDisplayModel display_model,
+                         const FcvvdpDisplayParams* const custom_params,
+                         FcvvdpCtx** const out_c);
 
-/*
+/**
  * Destroy a CVVDP context and free all resources
  *
- * @param ctx Context to destroy
+ * @param c Context to destroy
  */
-void cvvdp_destroy(FcvvdpCtx* ctx);
+void cvvdp_destroy(FcvvdpCtx* const c);
 
-/*
+/**
  * Compare two images/frames and compute quality score
  *
  * For video sequences, call this function for each frame pair in order.
  * The temporal filtering will accumulate the results.
  *
- * @param ctx        CVVDP context
+ * @param c          CVVDP context
  * @param reference  Reference image
  * @param distorted  Distorted image
  * @param result     Output result structure
  *
  * @return CVVDP_OK on success, error code otherwise
  */
-FcvvdpError cvvdp_process_frame(
-    FcvvdpCtx* ctx,
-    const FcvvdpImage* reference,
-    const FcvvdpImage* distorted,
-    FcvvdpResult* result
-);
+FcvvdpError cvvdp_process_frame(FcvvdpCtx* const c,
+                                const FcvvdpImage* const reference,
+                                const FcvvdpImage* const distorted,
+                                FcvvdpResult* const result);
 
-/*
+/**
  * Reset the temporal accumulator
  *
  * Call this between separate video sequences when reusing a context.
  *
- * @param ctx CVVDP context
+ * @param c CVVDP context
  *
  * @return CVVDP_OK on success, error code otherwise
  */
-FcvvdpError cvvdp_reset(FcvvdpCtx* ctx);
+FcvvdpError cvvdp_reset(FcvvdpCtx* const c);
 
-/*
+/**
  * Compare two single images (convenience function)
  *
  * Creates a temporary context, processes the images, and destroys the context.
@@ -190,15 +188,13 @@ FcvvdpError cvvdp_reset(FcvvdpCtx* ctx);
  *
  * @return CVVDP_OK on success, error code otherwise
  */
-FcvvdpError cvvdp_compare_images(
-    const FcvvdpImage* reference,
-    const FcvvdpImage* distorted,
-    FcvvdpDisplayModel display_model,
-    const FcvvdpDisplayParams* custom_params,
-    FcvvdpResult* result
-);
+FcvvdpError cvvdp_compare_images(const FcvvdpImage* const reference,
+                                 const FcvvdpImage* const distorted,
+                                 FcvvdpDisplayModel display_model,
+                                 const FcvvdpDisplayParams* const custom_params,
+                                 FcvvdpResult* const result);
 
-/*
+/**
  * Get default display parameters for a given model
  *
  * @param model      Display model preset
@@ -206,12 +202,10 @@ FcvvdpError cvvdp_compare_images(
  *
  * @return CVVDP_OK on success, error code otherwise
  */
-FcvvdpError cvvdp_get_display_params(
-    const FcvvdpDisplayModel model,
-    FcvvdpDisplayParams* const out_params
-);
+FcvvdpError cvvdp_get_display_params(const FcvvdpDisplayModel model,
+                                     FcvvdpDisplayParams* const out_params);
 
-/*
+/**
  * Get error message string
  *
  * @param error Error code
@@ -220,7 +214,7 @@ FcvvdpError cvvdp_get_display_params(
  */
 const char* cvvdp_error_string(FcvvdpError error);
 
-/*
+/**
  * Get version string
  *
  * @return Version string (e.g., "1.0.0")
@@ -233,4 +227,4 @@ static const char* cvvdp_version_string(void) {
 }
 #endif
 
-#endif /* CVVDP_H */
+#endif /* FCVVDP_H */

@@ -645,7 +645,7 @@ FcvvdpError cvvdp_csf_init(Csf* const csf,
     return CVVDP_OK;
 }
 
-static void cvvdp_csf_destroy(Csf* csf) {
+static void cvvdp_csf_destroy(Csf* const csf) {
     if (csf->log_S_LUT) {
         free(csf->log_S_LUT);
         csf->log_S_LUT = NULL;
@@ -657,9 +657,7 @@ static float cvvdp_csf_sensitivity(const Csf* const csf,
                                    const int band,
                                    const int channel)
 {
-    const float log_L = log10f(L_bkg_val);
-
-    float frac = 31.0f * (log_L - csf->log_L_bkg[0]) /
+    float frac = 31.0f * (log10f(L_bkg_val) - csf->log_L_bkg[0]) /
         (csf->log_L_bkg[31] - csf->log_L_bkg[0]);
 
     const int i_min = iclip((int)frac, 0, 30);
@@ -678,14 +676,14 @@ static float cvvdp_to_jod(const float quality) {
     if (quality > 0.1f)
         return 10.0f - CVVDP_JOD_A * powf(quality, CVVDP_JOD_EXP);
     else {
-        float jod_a_p = CVVDP_JOD_A * powf(0.1f, CVVDP_JOD_EXP - 1.0f);
+        const float jod_a_p = CVVDP_JOD_A * powf(0.1f, CVVDP_JOD_EXP - 1.0f);
         return 10.0f - jod_a_p * quality;
     }
 }
 
 static float cvvdp_compute_norm(const float* const data,
-                               const int count,
-                               const int power)
+                                const int count,
+                                const int power)
 {
     double sum = 0.0;
     for (int i = 0; i < count; i++)
@@ -693,16 +691,13 @@ static float cvvdp_compute_norm(const float* const data,
     return (float)pow(sum / count, 1.0 / power);
 }
 
-static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
-                                           float* ref_channels[4],
-                                           float* dis_channels[4],
-                                           double* out_score) {
-    int w = ctx->width;
-    int h = ctx->height;
+static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* const c,
+                                         float* const ref_channels[4],
+                                         float* const dst_channels[4],
+                                         double* const out_score) {
+    const int w = c->width, h = c->height;
+    const int num_levels = c->num_bands;
 
-    int num_levels = ctx->num_bands;
-
-    /* Allocate pyramid storage */
     size_t total_size = 0;
     int widths[CVVDP_MAX_LEVELS], heights[CVVDP_MAX_LEVELS];
     int tw = w, th = h;
@@ -714,9 +709,8 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
         th = (th + 1) / 2;
     }
 
-    /* Allocate work buffers for pyramid bands */
     float* ref_pyr[CVVDP_MAX_LEVELS][4];
-    float* dis_pyr[CVVDP_MAX_LEVELS][4];
+    float* dst_pyr[CVVDP_MAX_LEVELS][4];
     float* L_bkg_pyr[CVVDP_MAX_LEVELS];
     float* temp = cvvdp_alloc_float((size_t)w * h);
     float* reduced = cvvdp_alloc_float(total_size);
@@ -729,18 +723,16 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
         return CVVDP_ERROR_OUT_OF_MEMORY;
     }
 
-    /* Allocate pyramid levels */
     for (int lev = 0; lev < num_levels; lev++) {
-        size_t lev_size = (size_t)widths[lev] * heights[lev];
+        const size_t lev_size = (size_t)widths[lev] * heights[lev];
         for (int ch = 0; ch < 4; ch++) {
             ref_pyr[lev][ch] = cvvdp_alloc_float(lev_size);
-            dis_pyr[lev][ch] = cvvdp_alloc_float(lev_size);
-            if (!ref_pyr[lev][ch] || !dis_pyr[lev][ch]) {
-                /* Cleanup on failure */
+            dst_pyr[lev][ch] = cvvdp_alloc_float(lev_size);
+            if (!ref_pyr[lev][ch] || !dst_pyr[lev][ch]) {
                 for (int l = 0; l <= lev; l++) {
                     for (int c = 0; c < 4; c++) {
                         free(ref_pyr[l][c]);
-                        free(dis_pyr[l][c]);
+                        free(dst_pyr[l][c]);
                     }
                     free(L_bkg_pyr[l]);
                 }
@@ -755,7 +747,7 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
             for (int l = 0; l <= lev; l++) {
                 for (int c = 0; c < 4; c++) {
                     free(ref_pyr[l][c]);
-                    free(dis_pyr[l][c]);
+                    free(dst_pyr[l][c]);
                 }
                 free(L_bkg_pyr[l]);
             }
@@ -766,123 +758,94 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
         }
     }
 
-    /* Build Laplacian pyramid for each channel */
     for (int ch = 0; ch < 4; ch++) {
-        /* Reference */
         memcpy(temp, ref_channels[ch], (size_t)w * h * sizeof(float));
-
         int cw = w, ch_h = h;
         for (int lev = 0; lev < num_levels; lev++) {
-            size_t lev_size = (size_t)widths[lev] * heights[lev];
-
+            const size_t lev_size = (size_t)widths[lev] * heights[lev];
             if (lev < num_levels - 1) {
-                /* Reduce */
                 cvvdp_gauss_pyr_reduce(temp, reduced, cw, ch_h);
-
-                /* Expand and compute L_bkg (only from Y channel) */
-                if (ch == 0) {
+                if (!ch) {
                     cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
-                    for (size_t i = 0; i < lev_size; i++) {
+                    for (size_t i = 0; i < lev_size; i++)
                         L_bkg_pyr[lev][i] = fmax(0.01f, expanded[i]);
-                    }
                 }
-
-                /* Laplacian = current - expanded */
                 cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
                 for (size_t i = 0; i < lev_size; i++) {
-                    float contrast = (temp[i] - expanded[i]) / fmax(0.01f, L_bkg_pyr[lev][i]);
+                    const float contrast = (temp[i] - expanded[i]) /
+                        fmax(0.01f, L_bkg_pyr[lev][i]);
                     ref_pyr[lev][ch][i] = contrast * (lev == 0 ? 1.0f : 2.0f);
                 }
-
-                /* Prepare for next level */
-                memcpy(temp, reduced, (size_t)((cw+1)/2) * ((ch_h+1)/2) * sizeof(float));
+                memcpy(temp, reduced,
+                       (size_t)((cw+1)/2) * ((ch_h+1)/2) * sizeof(float));
                 cw = (cw + 1) / 2;
                 ch_h = (ch_h + 1) / 2;
             } else {
-                /* Baseband: compute mean for L_bkg */
-                if (ch == 0) {
+                if (!ch) {
                     float mean = 0.0f;
-                    for (size_t i = 0; i < lev_size; i++) {
+                    for (size_t i = 0; i < lev_size; i++)
                         mean += temp[i];
-                    }
                     mean /= lev_size;
-                    /* For baseband, store mean in first element (GPU uses single mean value) */
                     L_bkg_pyr[lev][0] = fmax(0.01f, mean);
                 }
-
-                /* Baseband contrast - divide by mean L_bkg */
-                for (size_t i = 0; i < lev_size; i++) {
-                    ref_pyr[lev][ch][i] = temp[i] / fmax(0.01f, L_bkg_pyr[lev][0]);
-                }
+                for (size_t i = 0; i < lev_size; i++)
+                    ref_pyr[lev][ch][i] = temp[i] /
+                        fmax(0.01f, L_bkg_pyr[lev][0]);
             }
         }
 
-        /* Distorted - same process */
-        memcpy(temp, dis_channels[ch], (size_t)w * h * sizeof(float));
-
+        memcpy(temp, dst_channels[ch], (size_t)w * h * sizeof(float));
         cw = w; ch_h = h;
         for (int lev = 0; lev < num_levels; lev++) {
-            size_t lev_size = (size_t)widths[lev] * heights[lev];
-
+            const size_t lev_size = (size_t)widths[lev] * heights[lev];
             if (lev < num_levels - 1) {
                 cvvdp_gauss_pyr_reduce(temp, reduced, cw, ch_h);
                 cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
-
                 for (size_t i = 0; i < lev_size; i++) {
-                    float contrast = (temp[i] - expanded[i]) / fmax(0.01f, L_bkg_pyr[lev][i]);
-                    dis_pyr[lev][ch][i] = contrast * (lev == 0 ? 1.0f : 2.0f);
+                    const float contrast = (temp[i] - expanded[i]) /
+                        fmax(0.01f, L_bkg_pyr[lev][i]);
+                    dst_pyr[lev][ch][i] = contrast * (lev == 0 ? 1.0f : 2.0f);
                 }
-
-                memcpy(temp, reduced, (size_t)((cw+1)/2) * ((ch_h+1)/2) * sizeof(float));
+                memcpy(temp, reduced,
+                       (size_t)((cw+1)/2) * ((ch_h+1)/2) * sizeof(float));
                 cw = (cw + 1) / 2;
                 ch_h = (ch_h + 1) / 2;
-            } else {
-                /* Baseband contrast - divide by mean L_bkg */
-                for (size_t i = 0; i < lev_size; i++) {
-                    dis_pyr[lev][ch][i] = temp[i] / fmax(0.01f, L_bkg_pyr[lev][0]);
-                }
-            }
+            } else
+                for (size_t i = 0; i < lev_size; i++)
+                    dst_pyr[lev][ch][i] = temp[i] /
+                        fmax(0.01f, L_bkg_pyr[lev][0]);
         }
     }
 
-    /* Apply CSF and compute distortion */
-    double total_score = 0.0;
-
-    /* Precompute Gaussian kernel for masking blur (sigma = pu_dilate = 3) */
     const float blur_sigma = 3.0f;
-    const int blur_radius = 8;  /* GAUSSIANSIZE from GPU code */
-    float blur_kernel[17];
+    const int blur_radius = CVVDP_GAUSSIAN_SIZE;
+    const float ch_gain[4] = {1.0f, 1.45f, 1.0f, 1.0f};
+    double total_score = 0.0;
     float blur_kernel_sum = 0.0f;
+    float blur_kernel[17];
     for (int i = 0; i < 17; i++) {
-        float d = (float)(i - 8);
+        const float d = (float)(i - 8);
         blur_kernel[i] = expf(-d * d / (2.0f * blur_sigma * blur_sigma));
         blur_kernel_sum += blur_kernel[i];
     }
-    for (int i = 0; i < 17; i++) {
+    for (int i = 0; i < 17; i++)
         blur_kernel[i] /= blur_kernel_sum;
-    }
 
     for (int lev = 0; lev < num_levels; lev++) {
-        size_t lev_size = (size_t)widths[lev] * heights[lev];
-        int lev_w = widths[lev];
-        int lev_h = heights[lev];
-        int is_baseband = (lev == num_levels - 1);
-
-        /* Channel gain - matches GPU preGaussianPreCompute_kernel */
-        float ch_gain[4] = {1.0f, 1.45f, 1.0f, 1.0f};
+        const size_t lev_size = (size_t)widths[lev] * heights[lev];
+        const int lev_w = widths[lev], lev_h = heights[lev];
+        const int is_baseband = (lev == num_levels - 1);
 
         if (!is_baseband) {
-            /* Non-baseband: Apply CSF, then masking, then compute D */
-            for (int ch = 0; ch < 4; ch++) {
-                /* Apply CSF */
+            for (int ch = 0; ch < 4; ch++)
                 for (size_t i = 0; i < lev_size; i++) {
-                    float S = cvvdp_csf_sensitivity(&ctx->csf, L_bkg_pyr[lev][i], lev, ch);
-                    ref_pyr[lev][ch][i] *= S * ch_gain[ch];
-                    dis_pyr[lev][ch][i] *= S * ch_gain[ch];
+                    const float s = cvvdp_csf_sensitivity(&c->csf,
+                                                          L_bkg_pyr[lev][i],
+                                                          lev, ch);
+                    ref_pyr[lev][ch][i] *= s * ch_gain[ch];
+                    dst_pyr[lev][ch][i] *= s * ch_gain[ch];
                 }
-            }
 
-            /* Compute min(|ref|, |dis|) for each channel and apply Gaussian blur */
             float* min_abs[4];
             float* blurred_min_abs[4];
             for (int ch = 0; ch < 4; ch++) {
@@ -896,55 +859,50 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
                     continue;
                 }
 
-                /* Compute min(|ref|, |dis|) */
                 for (size_t i = 0; i < lev_size; i++) {
                     float r = fabsf(ref_pyr[lev][ch][i]);
-                    float d = fabsf(dis_pyr[lev][ch][i]);
+                    float d = fabsf(dst_pyr[lev][ch][i]);
                     min_abs[ch][i] = fmin(r, d);
                 }
 
-                /* Apply separable Gaussian blur - horizontal pass */
-                float* temp_blur = cvvdp_alloc_float(lev_size);
-                if (temp_blur) {
+                float* const tmp_blur = cvvdp_alloc_float(lev_size);
+                if (tmp_blur) {
                     for (int y = 0; y < lev_h; y++) {
+                        float* const tmp_blur_row = &tmp_blur[y * lev_w];
                         for (int x = 0; x < lev_w; x++) {
-                            float sum = 0.0f;
-                            float wsum = 0.0f;
+                            float sum = 0.0f, wsum = 0.0f;
                             for (int k = -blur_radius; k <= blur_radius; k++) {
-                                int sx = x + k;
+                                const int sx = x + k;
                                 if (sx >= 0 && sx < lev_w) {
-                                    sum += min_abs[ch][y * lev_w + sx] * blur_kernel[k + blur_radius];
+                                    sum += min_abs[ch][y * lev_w + sx] *
+                                        blur_kernel[k + blur_radius];
                                     wsum += blur_kernel[k + blur_radius];
                                 }
                             }
-                            temp_blur[y * lev_w + x] = sum / wsum;
+                            tmp_blur_row[x] = sum / wsum;
                         }
                     }
 
-                    /* Vertical pass */
-                    for (int y = 0; y < lev_h; y++) {
+                    for (int y = 0; y < lev_h; y++)
                         for (int x = 0; x < lev_w; x++) {
-                            float sum = 0.0f;
-                            float wsum = 0.0f;
+                            float sum = 0.0f, wsum = 0.0f;
                             for (int k = -blur_radius; k <= blur_radius; k++) {
                                 int sy = y + k;
                                 if (sy >= 0 && sy < lev_h) {
-                                    sum += temp_blur[sy * lev_w + x] * blur_kernel[k + blur_radius];
+                                    sum += tmp_blur[sy * lev_w + x] *
+                                        blur_kernel[k + blur_radius];
                                     wsum += blur_kernel[k + blur_radius];
                                 }
                             }
                             blurred_min_abs[ch][y * lev_w + x] = sum / wsum;
                         }
-                    }
-                    free(temp_blur);
-                } else {
-                    memcpy(blurred_min_abs[ch], min_abs[ch], lev_size * sizeof(float));
-                }
+                    free(tmp_blur);
+                } else memcpy(blurred_min_abs[ch], min_abs[ch],
+                              lev_size * sizeof(float));
             }
 
-            /* Compute distortion with masking - matches GPU computeD_Kernel */
-            float* D = cvvdp_alloc_float(lev_size * 4);
-            if (!D) {
+            float* const d = cvvdp_alloc_float(lev_size * 4);
+            if (!d) {
                 for (int ch = 0; ch < 4; ch++) {
                     free(min_abs[ch]);
                     free(blurred_min_abs[ch]);
@@ -952,88 +910,81 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
                 continue;
             }
 
-            float max_v = powf(10.0f, CVVDP_D_MAX);
-            float pow_mask_c = powf(10.0f, CVVDP_MASK_C);
+            const float max_v = powf(10.0f, CVVDP_D_MAX);
+            const float pow_mask_c = powf(10.0f, CVVDP_MASK_C);
 
             for (size_t i = 0; i < lev_size; i++) {
-                /* Compute Cm values from blurred min(|ref|, |dis|) */
-                float Cm[4];
+                float cm[4];
+                for (int ch = 0; ch < 4; ch++)
+                    cm[ch] = powf(pow_mask_c * blurred_min_abs[ch][i],
+                                  CVVDP_MASK_Q[ch]);
                 for (int ch = 0; ch < 4; ch++) {
-                    Cm[ch] = powf(pow_mask_c * blurred_min_abs[ch][i], CVVDP_MASK_Q[ch]);
-                }
+                    const float mask =
+                        cm[0] * powf(2.0f, CVVDP_XCM_WEIGHTS[0 + ch]) +
+                        cm[1] * powf(2.0f, CVVDP_XCM_WEIGHTS[4 + ch]) +
+                        cm[2] * powf(2.0f, CVVDP_XCM_WEIGHTS[8 + ch]) +
+                        cm[3] * powf(2.0f, CVVDP_XCM_WEIGHTS[12 + ch]);
 
-                /* Cross-channel masking - matches GPU computeD_Kernel Cmask computation */
-                for (int ch = 0; ch < 4; ch++) {
-                    float mask = Cm[0] * powf(2.0f, CVVDP_XCM_WEIGHTS[0 + ch]) +
-                                 Cm[1] * powf(2.0f, CVVDP_XCM_WEIGHTS[4 + ch]) +
-                                 Cm[2] * powf(2.0f, CVVDP_XCM_WEIGHTS[8 + ch]) +
-                                 Cm[3] * powf(2.0f, CVVDP_XCM_WEIGHTS[12 + ch]);
+                    const float diff =
+                        fabsf(ref_pyr[lev][ch][i] - dst_pyr[lev][ch][i]);
+                    const float du = powf(diff, CVVDP_MASK_P) / (1.0f + mask);
+                    const float d_val = max_v * du / (max_v + du);
 
-                    float diff = fabsf(ref_pyr[lev][ch][i] - dis_pyr[lev][ch][i]);
-                    float Du = powf(diff, CVVDP_MASK_P) / (1.0f + mask);
-                    float D_val = max_v * Du / (max_v + Du);
-
-                    /* Channel weights - matches GPU computeD_Kernel */
                     float weight = 1.0f;
-                    if (ch == 1 || ch == 2) weight = CVVDP_CH_CHROM_W;
-                    if (ch == 3) weight = CVVDP_CH_TRANS_W;
+                    switch (ch) {
+                        case 1:
+                        case 2:
+                            weight = CVVDP_CH_CHROM_W;
+                            break;
+                        case 3:
+                            weight = CVVDP_CH_TRANS_W;
+                            break;
+                    }
 
-                    D[ch * lev_size + i] = D_val * weight;
+                    d[ch * lev_size + i] = d_val * weight;
                 }
             }
 
-            /* Free temporary buffers */
             for (int ch = 0; ch < 4; ch++) {
                 free(min_abs[ch]);
                 free(blurred_min_abs[ch]);
             }
 
-            /* Pool distortion values - 2-norm then power-4 */
             for (int ch = 0; ch < 4; ch++) {
-                float norm = cvvdp_compute_norm(D + ch * lev_size, (int)lev_size, 2);
-                double contrib = pow(norm, 4);
-                total_score += contrib;
+                const float norm = cvvdp_compute_norm(d + ch * lev_size,
+                                                      (int)lev_size, 2);
+                total_score += pow(norm, 4);
             }
 
-            free(D);
+            free(d);
         } else {
-            /* Baseband: Different processing - no masking, just abs diff * S * baseband_weight
-             * Matches GPU computeD_baseband_kernel */
-            float* D = cvvdp_alloc_float(lev_size * 4);
-            if (!D) continue;
-
-            /* Use mean L_bkg for baseband (stored in first element) */
-            float L_bkg_mean = L_bkg_pyr[lev][0];
-
+            float* const d = cvvdp_alloc_float(lev_size * 4);
+            if (!d) continue;
             for (int ch = 0; ch < 4; ch++) {
-                float S = cvvdp_csf_sensitivity(&ctx->csf, L_bkg_mean, lev, ch);
-
+                const float s =
+                    cvvdp_csf_sensitivity(&c->csf, L_bkg_pyr[lev][0],
+                                          lev, ch);
+                float* const drow = &d[ch * lev_size];
                 for (size_t i = 0; i < lev_size; i++) {
-                    /* Baseband: simple abs difference * sensitivity * baseband_weight */
-                    float diff = fabsf(ref_pyr[lev][ch][i] - dis_pyr[lev][ch][i]);
-                    D[ch * lev_size + i] = diff * S * CVVDP_BASEBAND_WEIGHT[ch];
+                    const float diff =
+                        fabsf(ref_pyr[lev][ch][i] - dst_pyr[lev][ch][i]);
+                    drow[i] = diff * s * CVVDP_BASEBAND_WEIGHT[ch];
                 }
             }
-
-            /* Pool distortion values - 2-norm then power-4 */
             for (int ch = 0; ch < 4; ch++) {
-                float norm = cvvdp_compute_norm(D + ch * lev_size, (int)lev_size, 2);
-                double contrib = pow(norm, 4);
-                total_score += contrib;
+                const float norm =
+                    cvvdp_compute_norm(d + ch * lev_size,
+                                       (int)lev_size, 2);
+                total_score += pow(norm, 4);
             }
-
-            free(D);
+            free(d);
         }
     }
 
-    /* Final score */
-    *out_score = pow(total_score, 0.25);
-
-    /* Cleanup */
     for (int lev = 0; lev < num_levels; lev++) {
         for (int ch = 0; ch < 4; ch++) {
             free(ref_pyr[lev][ch]);
-            free(dis_pyr[lev][ch]);
+            free(dst_pyr[lev][ch]);
         }
         free(L_bkg_pyr[lev]);
     }
@@ -1041,6 +992,7 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* ctx,
     free(reduced);
     free(expanded);
 
+    *out_score = pow(total_score, 0.25);
     return CVVDP_OK;
 }
 
@@ -1049,255 +1001,264 @@ FcvvdpError cvvdp_create(const int width,
                          const float fps,
                          const FcvvdpDisplayModel display_model,
                          const FcvvdpDisplayParams* const custom_params,
-                         FcvvdpCtx** const out_ctx)
+                         FcvvdpCtx** const out_c)
 {
-    if (!out_ctx) return CVVDP_ERROR_NULL_POINTER;
+    if (!out_c) return CVVDP_ERROR_NULL_POINTER;
     if (width <= 0 || height <= 0) return CVVDP_ERROR_INVALID_DIMENSIONS;
 
-    FcvvdpCtx* ctx = (FcvvdpCtx*)calloc(1, sizeof(FcvvdpCtx));
-    if (!ctx) return CVVDP_ERROR_OUT_OF_MEMORY;
+    FcvvdpCtx* const c = (FcvvdpCtx*)calloc(1, sizeof(FcvvdpCtx));
+    if (!c) return CVVDP_ERROR_OUT_OF_MEMORY;
 
-    ctx->width = width;
-    ctx->height = height;
-    ctx->fps = fps > 0 ? fps : 0;
-    ctx->num_frames = 0;
-    ctx->score_square_sum = 0.0;
+    c->width = width;
+    c->height = height;
+    c->fps = fps > 0 ? fps : 0;
+    c->num_frames = 0;
+    c->score_square_sum = 0.0;
 
-    /* Initialize display model */
-    cvvdp_init_display(&ctx->display, display_model, custom_params);
+    cvvdp_init_display(&c->display, display_model, custom_params);
 
-    /* Initialize Gaussian filter */
-    cvvdp_gaussian_init(&ctx->gaussian);
+    cvvdp_gaussian_init(&c->gaussian);
 
-    /* Get band frequencies */
-    ctx->band_frequencies = cvvdp_alloc_float(CVVDP_MAX_LEVELS);
-    if (!ctx->band_frequencies) {
-        free(ctx);
+    c->band_frequencies = cvvdp_alloc_float(CVVDP_MAX_LEVELS);
+    if (!c->band_frequencies) {
+        free(c);
         return CVVDP_ERROR_OUT_OF_MEMORY;
     }
-    ctx->num_bands = cvvdp_get_band_frequencies(width, height, ctx->display.ppd,
-                                                 ctx->band_frequencies);
+    c->num_bands = cvvdp_get_band_frequencies(width, height,
+                                                c->display.ppd,
+                                                c->band_frequencies);
 
-    /* Initialize CSF */
-    FcvvdpError err = cvvdp_csf_init(&ctx->csf, width, height, ctx->display.ppd);
+    FcvvdpError err = cvvdp_csf_init(&c->csf, width, height,
+                                     c->display.ppd);
     if (err != CVVDP_OK) {
-        free(ctx->band_frequencies);
-        free(ctx);
+        free(c->band_frequencies);
+        free(c);
         return err;
     }
 
-    /* Initialize temporal rings */
-    err = cvvdp_temporal_ring_init(&ctx->ring_ref, width, height, fps);
+    err = cvvdp_temporal_ring_init(&c->ring_ref, width, height, fps);
     if (err != CVVDP_OK) {
-        cvvdp_csf_destroy(&ctx->csf);
-        free(ctx->band_frequencies);
-        free(ctx);
+        cvvdp_csf_destroy(&c->csf);
+        free(c->band_frequencies);
+        free(c);
         return err;
     }
 
-    err = cvvdp_temporal_ring_init(&ctx->ring_dis, width, height, fps);
+    err = cvvdp_temporal_ring_init(&c->ring_dis, width, height, fps);
     if (err != CVVDP_OK) {
-        cvvdp_temporal_ring_destroy(&ctx->ring_ref);
-        cvvdp_csf_destroy(&ctx->csf);
-        free(ctx->band_frequencies);
-        free(ctx);
+        cvvdp_temporal_ring_destroy(&c->ring_ref);
+        cvvdp_csf_destroy(&c->csf);
+        free(c->band_frequencies);
+        free(c);
         return err;
     }
 
-    /* Allocate work buffers */
-    size_t plane_size = (size_t)width * height;
-    ctx->Y_sustained = cvvdp_alloc_float(plane_size);
-    ctx->RG_sustained = cvvdp_alloc_float(plane_size);
-    ctx->YV_sustained = cvvdp_alloc_float(plane_size);
-    ctx->Y_transient = cvvdp_alloc_float(plane_size);
-    ctx->work_buffer = cvvdp_alloc_float(plane_size * 3);
+    const size_t plane_size = (size_t)width * height;
+    c->Y_sustained = cvvdp_alloc_float(plane_size);
+    c->RG_sustained = cvvdp_alloc_float(plane_size);
+    c->YV_sustained = cvvdp_alloc_float(plane_size);
+    c->Y_transient = cvvdp_alloc_float(plane_size);
+    c->work_buffer = cvvdp_alloc_float(plane_size * 3);
 
-    if (!ctx->Y_sustained || !ctx->RG_sustained || !ctx->YV_sustained ||
-        !ctx->Y_transient || !ctx->work_buffer) {
-        cvvdp_destroy(ctx);
+    if (!c->Y_sustained || !c->RG_sustained || !c->YV_sustained ||
+        !c->Y_transient || !c->work_buffer)
+    {
+        cvvdp_destroy(c);
         return CVVDP_ERROR_OUT_OF_MEMORY;
     }
 
-    *out_ctx = ctx;
+    *out_c = c;
     return CVVDP_OK;
 }
 
-void cvvdp_destroy(FcvvdpCtx* ctx) {
-    if (!ctx) return;
+void cvvdp_destroy(FcvvdpCtx* const c) {
+    if (!c) return;
 
-    cvvdp_temporal_ring_destroy(&ctx->ring_ref);
-    cvvdp_temporal_ring_destroy(&ctx->ring_dis);
-    cvvdp_csf_destroy(&ctx->csf);
+    cvvdp_temporal_ring_destroy(&c->ring_ref);
+    cvvdp_temporal_ring_destroy(&c->ring_dis);
+    cvvdp_csf_destroy(&c->csf);
 
-    free(ctx->band_frequencies);
-    free(ctx->Y_sustained);
-    free(ctx->RG_sustained);
-    free(ctx->YV_sustained);
-    free(ctx->Y_transient);
-    free(ctx->work_buffer);
+    free(c->band_frequencies);
+    free(c->Y_sustained);
+    free(c->RG_sustained);
+    free(c->YV_sustained);
+    free(c->Y_transient);
+    free(c->work_buffer);
 
-    free(ctx);
+    free(c);
 }
 
-FcvvdpError cvvdp_reset(FcvvdpCtx* ctx) {
-    if (!ctx) {
+FcvvdpError cvvdp_reset(FcvvdpCtx* const c) {
+    if (!c)
         return CVVDP_ERROR_NULL_POINTER;
-    }
 
-    ctx->num_frames = 0;
-    ctx->score_square_sum = 0.0;
-    cvvdp_temporal_ring_reset(&ctx->ring_ref);
-    cvvdp_temporal_ring_reset(&ctx->ring_dis);
+    c->num_frames = 0;
+    c->score_square_sum = 0.0;
+    cvvdp_temporal_ring_reset(&c->ring_ref);
+    cvvdp_temporal_ring_reset(&c->ring_dis);
 
     return CVVDP_OK;
 }
 
-FcvvdpError cvvdp_process_frame(FcvvdpCtx* ctx,
-                                  const FcvvdpImage* reference,
-                                  const FcvvdpImage* distorted,
-                                  FcvvdpResult* result) {
-    if (!ctx || !reference || !distorted || !result) {
+FcvvdpError cvvdp_process_frame(FcvvdpCtx* const c,
+                                const FcvvdpImage* const reference,
+                                const FcvvdpImage* const distorted,
+                                FcvvdpResult* const result)
+{
+    if (!c || !reference || !distorted || !result)
         return CVVDP_ERROR_NULL_POINTER;
-    }
 
-    if (reference->width != ctx->width || reference->height != ctx->height ||
-        distorted->width != ctx->width || distorted->height != ctx->height) {
+    if (reference->width != c->width || reference->height != c->height ||
+        distorted->width != c->width || distorted->height != c->height)
+    {
         return CVVDP_ERROR_DIMENSION_MISMATCH;
     }
 
-    size_t plane_size = (size_t)ctx->width * ctx->height;
-
-    /* Allocate temporary planes */
-    float* ref_planes[3] = {
+    const size_t plane_size = (size_t)c->width * c->height;
+    float* const ref_planes[3] = {
         cvvdp_alloc_float(plane_size),
         cvvdp_alloc_float(plane_size),
         cvvdp_alloc_float(plane_size)
     };
-    float* dis_planes[3] = {
+    float* const dst_planes[3] = {
         cvvdp_alloc_float(plane_size),
         cvvdp_alloc_float(plane_size),
         cvvdp_alloc_float(plane_size)
     };
 
     if (!ref_planes[0] || !ref_planes[1] || !ref_planes[2] ||
-        !dis_planes[0] || !dis_planes[1] || !dis_planes[2]) {
+        !dst_planes[0] || !dst_planes[1] || !dst_planes[2])
+    {
         for (int i = 0; i < 3; i++) {
             free(ref_planes[i]);
-            free(dis_planes[i]);
+            free(dst_planes[i]);
         }
         return CVVDP_ERROR_OUT_OF_MEMORY;
     }
 
-    /* Load images */
     FcvvdpError err = cvvdp_load_image(reference, ref_planes);
     if (err != CVVDP_OK) {
         for (int i = 0; i < 3; i++) {
             free(ref_planes[i]);
-            free(dis_planes[i]);
+            free(dst_planes[i]);
         }
         return err;
     }
 
-    err = cvvdp_load_image(distorted, dis_planes);
+    err = cvvdp_load_image(distorted, dst_planes);
     if (err != CVVDP_OK) {
         for (int i = 0; i < 3; i++) {
             free(ref_planes[i]);
-            free(dis_planes[i]);
+            free(dst_planes[i]);
         }
         return err;
     }
 
-    /* Apply display model to Y channel */
-    const bool is_hdr = ctx->display.is_hdr;
+    const bool is_hdr = c->display.is_hdr;
     for (int i = 0; i < 3; i++) {
-        /* For simplicity, apply to all planes (should be luminance only) */
-        cvvdp_apply_display_model(ref_planes[i], (int)plane_size, &ctx->display, is_hdr);
-        cvvdp_apply_display_model(dis_planes[i], (int)plane_size, &ctx->display, is_hdr);
+        cvvdp_apply_display_model(ref_planes[i], (int)plane_size,
+                                  &c->display, is_hdr);
+        cvvdp_apply_display_model(dst_planes[i], (int)plane_size,
+                                  &c->display, is_hdr);
     }
 
-    /* Convert to XYZ then DKL */
-    cvvdp_rgb_to_xyz(ref_planes[0], ref_planes[1], ref_planes[2], (int)plane_size);
-    cvvdp_rgb_to_xyz(dis_planes[0], dis_planes[1], dis_planes[2], (int)plane_size);
-    cvvdp_xyz_to_dkl(ref_planes[0], ref_planes[1], ref_planes[2], (int)plane_size);
-    cvvdp_xyz_to_dkl(dis_planes[0], dis_planes[1], dis_planes[2], (int)plane_size);
+    cvvdp_rgb_to_xyz(ref_planes[0], ref_planes[1], ref_planes[2],
+                     (int)plane_size);
+    cvvdp_rgb_to_xyz(dst_planes[0], dst_planes[1], dst_planes[2],
+                     (int)plane_size);
+    cvvdp_xyz_to_dkl(ref_planes[0], ref_planes[1], ref_planes[2],
+                     (int)plane_size);
+    cvvdp_xyz_to_dkl(dst_planes[0], dst_planes[1], dst_planes[2],
+                     (int)plane_size);
 
-    /* Store in temporal ring (interleaved) */
-    float* ref_frame = cvvdp_alloc_float(plane_size * 3);
-    float* dis_frame = cvvdp_alloc_float(plane_size * 3);
-    if (!ref_frame || !dis_frame) {
+    float* const ref_frame = cvvdp_alloc_float(plane_size * 3);
+    float* const dst_frame = cvvdp_alloc_float(plane_size * 3);
+    if (!ref_frame || !dst_frame) {
         for (int i = 0; i < 3; i++) {
             free(ref_planes[i]);
-            free(dis_planes[i]);
+            free(dst_planes[i]);
         }
         free(ref_frame);
-        free(dis_frame);
+        free(dst_frame);
         return CVVDP_ERROR_OUT_OF_MEMORY;
     }
 
     memcpy(ref_frame, ref_planes[0], plane_size * sizeof(float));
     memcpy(ref_frame + plane_size, ref_planes[1], plane_size * sizeof(float));
-    memcpy(ref_frame + 2 * plane_size, ref_planes[2], plane_size * sizeof(float));
-    memcpy(dis_frame, dis_planes[0], plane_size * sizeof(float));
-    memcpy(dis_frame + plane_size, dis_planes[1], plane_size * sizeof(float));
-    memcpy(dis_frame + 2 * plane_size, dis_planes[2], plane_size * sizeof(float));
+    memcpy(ref_frame + 2 * plane_size, ref_planes[2],
+           plane_size * sizeof(float));
+    memcpy(dst_frame, dst_planes[0], plane_size * sizeof(float));
+    memcpy(dst_frame + plane_size, dst_planes[1], plane_size * sizeof(float));
+    memcpy(dst_frame + 2 * plane_size, dst_planes[2],
+           plane_size * sizeof(float));
 
-    cvvdp_temporal_ring_push(&ctx->ring_ref, ref_frame);
-    cvvdp_temporal_ring_push(&ctx->ring_dis, dis_frame);
+    cvvdp_temporal_ring_push(&c->ring_ref, ref_frame);
+    cvvdp_temporal_ring_push(&c->ring_dis, dst_frame);
 
     free(ref_frame);
-    free(dis_frame);
+    free(dst_frame);
     for (int i = 0; i < 3; i++) {
         free(ref_planes[i]);
-        free(dis_planes[i]);
+        free(dst_planes[i]);
     }
 
-    /* Compute temporal channels */
-    float* ref_Y_sus = cvvdp_alloc_float(plane_size);
-    float* ref_RG_sus = cvvdp_alloc_float(plane_size);
-    float* ref_YV_sus = cvvdp_alloc_float(plane_size);
-    float* ref_Y_trans = cvvdp_alloc_float(plane_size);
-    float* dis_Y_sus = cvvdp_alloc_float(plane_size);
-    float* dis_RG_sus = cvvdp_alloc_float(plane_size);
-    float* dis_YV_sus = cvvdp_alloc_float(plane_size);
-    float* dis_Y_trans = cvvdp_alloc_float(plane_size);
+    float* const ref_Y_sus = cvvdp_alloc_float(plane_size);
+    float* const ref_RG_sus = cvvdp_alloc_float(plane_size);
+    float* const ref_YV_sus = cvvdp_alloc_float(plane_size);
+    float* const ref_Y_trans = cvvdp_alloc_float(plane_size);
+    float* const dst_Y_sus = cvvdp_alloc_float(plane_size);
+    float* const dst_RG_sus = cvvdp_alloc_float(plane_size);
+    float* const dst_YV_sus = cvvdp_alloc_float(plane_size);
+    float* const dst_Y_trans = cvvdp_alloc_float(plane_size);
 
     if (!ref_Y_sus || !ref_RG_sus || !ref_YV_sus || !ref_Y_trans ||
-        !dis_Y_sus || !dis_RG_sus || !dis_YV_sus || !dis_Y_trans) {
-        free(ref_Y_sus); free(ref_RG_sus); free(ref_YV_sus); free(ref_Y_trans);
-        free(dis_Y_sus); free(dis_RG_sus); free(dis_YV_sus); free(dis_Y_trans);
+        !dst_Y_sus || !dst_RG_sus || !dst_YV_sus || !dst_Y_trans)
+    {
+        free(ref_Y_sus);
+        free(ref_RG_sus);
+        free(ref_YV_sus);
+        free(ref_Y_trans);
+        free(dst_Y_sus);
+        free(dst_RG_sus);
+        free(dst_YV_sus);
+        free(dst_Y_trans);
         return CVVDP_ERROR_OUT_OF_MEMORY;
     }
 
-    cvvdp_compute_temporal_channels(&ctx->ring_ref, ref_Y_sus, ref_RG_sus, ref_YV_sus, ref_Y_trans);
-    cvvdp_compute_temporal_channels(&ctx->ring_dis, dis_Y_sus, dis_RG_sus, dis_YV_sus, dis_Y_trans);
+    cvvdp_compute_temporal_channels(&c->ring_ref, ref_Y_sus, ref_RG_sus,
+                                    ref_YV_sus, ref_Y_trans);
+    cvvdp_compute_temporal_channels(&c->ring_dis, dst_Y_sus, dst_RG_sus,
+                                    dst_YV_sus, dst_Y_trans);
 
-    /* Process pyramid and compute score */
-    float* ref_channels[4] = {ref_Y_sus, ref_RG_sus, ref_YV_sus, ref_Y_trans};
-    float* dis_channels[4] = {dis_Y_sus, dis_RG_sus, dis_YV_sus, dis_Y_trans};
+    float* const ref_channels[4] =
+        {ref_Y_sus, ref_RG_sus, ref_YV_sus, ref_Y_trans};
+    float* const dst_channels[4] =
+        {dst_Y_sus, dst_RG_sus, dst_YV_sus, dst_Y_trans};
 
     double current_score;
-    err = cvvdp_process_pyramid(ctx, ref_channels, dis_channels, &current_score);
+    err = cvvdp_process_pyramid(c, ref_channels, dst_channels,
+                                &current_score);
 
-    free(ref_Y_sus); free(ref_RG_sus); free(ref_YV_sus); free(ref_Y_trans);
-    free(dis_Y_sus); free(dis_RG_sus); free(dis_YV_sus); free(dis_Y_trans);
+    free(ref_Y_sus);
+    free(ref_RG_sus);
+    free(ref_YV_sus);
+    free(ref_Y_trans);
+    free(dst_Y_sus);
+    free(dst_RG_sus);
+    free(dst_YV_sus);
+    free(dst_Y_trans);
 
-    if (err != CVVDP_OK) {
-        return err;
-    }
+    if (err != CVVDP_OK) return err;
 
-    /* Accumulate score over frames */
-    ctx->num_frames++;
-    ctx->score_square_sum += pow(current_score, CVVDP_BETA_T);
+    c->num_frames++;
+    c->score_square_sum += pow(current_score, CVVDP_BETA_T);
 
-    /* For single image comparison, apply image integration factor */
     double resQ;
-    if (ctx->num_frames == 1) {
-        /* Single frame: apply image_int scaling factor */
+    if (c->num_frames == 1)
         resQ = current_score * CVVDP_IMAGE_INT;
-    } else {
-        /* Multi-frame: temporal pooling */
-        resQ = pow(ctx->score_square_sum / (double)ctx->num_frames, 1.0 / CVVDP_BETA_T);
-    }
+    else
+        resQ = pow(c->score_square_sum /
+            (double)c->num_frames, 1.0 / CVVDP_BETA_T);
 
     result->quality = resQ;
     result->jod = cvvdp_to_jod((float)resQ);
@@ -1305,25 +1266,24 @@ FcvvdpError cvvdp_process_frame(FcvvdpCtx* ctx,
     return CVVDP_OK;
 }
 
-FcvvdpError cvvdp_compare_images(const FcvvdpImage* reference,
-                                   const FcvvdpImage* distorted,
-                                   FcvvdpDisplayModel display_model,
-                                   const FcvvdpDisplayParams* custom_params,
-                                   FcvvdpResult* result) {
-    if (!reference || !distorted || !result)
-        return CVVDP_ERROR_NULL_POINTER;
+FcvvdpError cvvdp_compare_images(const FcvvdpImage* const reference,
+                                 const FcvvdpImage* const distorted,
+                                 FcvvdpDisplayModel display_model,
+                                 const FcvvdpDisplayParams* const custom_params,
+                                 FcvvdpResult* const result)
+{
+    if (!reference || !distorted || !result) return CVVDP_ERROR_NULL_POINTER;
 
     if (reference->width != distorted->width || reference->height != distorted->height)
         return CVVDP_ERROR_DIMENSION_MISMATCH;
 
-    FcvvdpCtx* ctx;
+    FcvvdpCtx* c;
     FcvvdpError err = cvvdp_create(reference->width, reference->height, 0,
-                                      display_model, custom_params, &ctx);
-    if (err != CVVDP_OK)
-        return err;
+                                      display_model, custom_params, &c);
+    if (err != CVVDP_OK) return err;
 
-    err = cvvdp_process_frame(ctx, reference, distorted, result);
-    cvvdp_destroy(ctx);
+    err = cvvdp_process_frame(c, reference, distorted, result);
+    cvvdp_destroy(c);
 
     return err;
 }
