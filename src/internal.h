@@ -17,11 +17,11 @@
 #ifndef FCVVDP_INTERNAL_H
 #define FCVVDP_INTERNAL_H
 
-#include <math.h>
 #include <stdlib.h>
 #include "cvvdp.h"
 #include "lut.h"
 
+#define M_PI 3.14159265358979323846f
 #define TAU (2.0 * M_PI)
 
 #define CVVDP_MAX_LEVELS 14 // maximum pyramid levels
@@ -87,9 +87,6 @@ typedef struct TemporalRingBuf {
 
 // csf
 typedef struct Csf {
-    // log of background luminance LUT indices
-    float log_L_bkg[CVVDP_LUT_SIZE];
-
     // sensitivity LUT: [num_bands * 4 channels * 32]
     float* log_S_LUT;
 

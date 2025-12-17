@@ -622,13 +622,6 @@ FcvvdpError cvvdp_csf_init(Csf* const csf,
     float freqs[CVVDP_MAX_LEVELS];
     csf->num_bands = cvvdp_get_band_frequencies(width, height, ppd, freqs);
 
-    for (int i = 0; i < CVVDP_LUT_SIZE; i++)
-        csf->log_L_bkg[i] = log10f(L_BKG[i]);
-
-    float log_rho[CVVDP_LUT_SIZE];
-    for (int i = 0; i < CVVDP_LUT_SIZE; i++)
-        log_rho[i] = log10f(RHO[i]);
-
     csf->log_S_LUT = cvvdp_alloc_float(csf->num_bands * 4 * CVVDP_LUT_SIZE);
     if (!csf->log_S_LUT) return CVVDP_ERROR_OUT_OF_MEMORY;
 
@@ -637,7 +630,7 @@ FcvvdpError cvvdp_csf_init(Csf* const csf,
 
         int rho_idx = 0;
         for (int i = 1; i < CVVDP_LUT_SIZE; i++) {
-            if (log_rho[i] > log_freq) {
+            if (LOG10_RHO[i] > log_freq) {
                 rho_idx = i - 1;
                 break;
             }
@@ -645,8 +638,8 @@ FcvvdpError cvvdp_csf_init(Csf* const csf,
         }
         rho_idx = imin(rho_idx, 30);
 
-        const float slope = (log_freq - log_rho[rho_idx]) /
-            (log_rho[rho_idx + 1] - log_rho[rho_idx]);
+        const float slope = (log_freq - LOG10_RHO[rho_idx]) /
+            (LOG10_RHO[rho_idx + 1] - LOG10_RHO[rho_idx]);
 
         for (int ch = 0; ch < 4; ch++)
             for (int l = 0; l < CVVDP_LUT_SIZE; l++) {
@@ -672,8 +665,8 @@ static float cvvdp_csf_sensitivity(const Csf* const csf,
                                    const int band,
                                    const int channel)
 {
-    float frac = 31.0f * (log10f(L_bkg_val) - csf->log_L_bkg[0]) /
-        (csf->log_L_bkg[31] - csf->log_L_bkg[0]);
+    float frac = 31.0f * (log10f(L_bkg_val) - LOG10_L_BKG[0]) /
+        (LOG10_L_BKG[31] - LOG10_L_BKG[0]);
 
     const int i_min = iclip((int)frac, 0, 30);
     const int i_max = i_min + 1;
