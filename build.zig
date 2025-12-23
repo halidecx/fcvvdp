@@ -17,7 +17,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const strip = if (optimize == .ReleaseFast) true else false;
+    const strip = b.option(bool, "strip", "whether to strip the binary. defaults to true in release, false in debug.");
     const flto = b.option(bool, "flto", "enable Link Time Optimization, defaults to false") orelse false;
     const zlib_opt = b.option(@import("spng").Zlib, "zlib", "which zlib to use") orelse .zlib;
     const options = b.addOptions();
