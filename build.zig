@@ -22,13 +22,6 @@ pub fn build(b: *std.Build) void {
     const zlib_opt = b.option(@import("spng").Zlib, "zlib", "which zlib to use") orelse .zlib;
     const options = b.addOptions();
 
-    // cvvdp.h
-    const install_header = b.addInstallFile(
-        b.path("src/cvvdp.h"),
-        "include/cvvdp.h",
-    );
-    b.getInstallStep().dependOn(&install_header.step);
-
     // 'libcvvdp.a' static lib
     const cvvdp = b.addLibrary(.{
         .name = "cvvdp",
@@ -54,6 +47,9 @@ pub fn build(b: *std.Build) void {
         .flags = if (flto) &cvvdp_flags ++ &[_][]const u8{"-flto=thin"} else &cvvdp_flags,
     });
     cvvdp.root_module.addIncludePath(b.path("."));
+
+    cvvdp.installHeader(b.path("src/cvvdp.h"), "cvvdp.h");
+
     b.installArtifact(cvvdp);
 
     const spng = b.dependency("spng", .{.target = target, .optimize = optimize, .zlib = zlib_opt, .strip = strip}).artifact("spng");
