@@ -3,12 +3,12 @@
     .version = "0.0.1",
     .dependencies = .{
         .spng = .{
-            .url = "git+https://codeberg.org/cancername/spng#fe54c88a6b0b172d3fd23de7871d64721d242151",
-            .hash = "spng-0.7.4-hOBlvMoNAADQbLAB-MtJUj4H7vDNqrS-mDP0u9pLxjZC",
+            .url = "git+https://codeberg.org/cancername/spng#71888d6cdddcbf3265f37c00078c0c5ec0ee5c96",
+            .hash = "spng-0.7.4-hOBlvNMXAABwT3voyn2WkIiKXFWPvdCiIz_NVQ3NWhj0",
         },
     },
     .fingerprint = 0xfe41744458a5e60e,
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.15.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
