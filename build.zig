@@ -48,6 +48,9 @@ pub fn build(b: *std.Build) void {
     cvvdp.root_module.addIncludePath(b.path("."));
     b.installArtifact(cvvdp);
 
+    // cvvdp.h
+    cvvdp.installHeader(b.path("src/cvvdp.h"), "cvvdp.h");
+
     // libspng
     const spng = b.addLibrary(.{
         .name = "spng",
