@@ -1,6 +1,12 @@
 .{
     .name = .fcvvdp,
     .version = "0.0.1",
+    .dependencies = .{
+        .spng = .{
+            .url = "git+https://codeberg.org/cancername/spng#fe54c88a6b0b172d3fd23de7871d64721d242151",
+            .hash = "spng-0.7.4-hOBlvMoNAADQbLAB-MtJUj4H7vDNqrS-mDP0u9pLxjZC",
+        },
+    },
     .fingerprint = 0xfe41744458a5e60e,
     .minimum_zig_version = "0.15.2",
     .paths = .{

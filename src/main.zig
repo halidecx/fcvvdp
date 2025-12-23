@@ -15,7 +15,7 @@
 const std = @import("std");
 const y4m = @import("y4m.zig");
 const c = @cImport({
-    @cInclude("third-party/spng.h");
+    @cInclude("spng.h");
     @cInclude("src/cvvdp.h");
 });
 

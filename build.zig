@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const strip = if (optimize == .ReleaseFast) true else false;
     const flto = b.option(bool, "flto", "enable Link Time Optimization, defaults to false") orelse false;
+    const zlib_opt = b.option(@import("spng").Zlib, "zlib", "which zlib to use") orelse .zlib;
     const options = b.addOptions();
 
     // cvvdp.h
@@ -55,24 +56,7 @@ pub fn build(b: *std.Build) void {
     cvvdp.root_module.addIncludePath(b.path("."));
     b.installArtifact(cvvdp);
 
-    // libspng
-    const spng = b.addLibrary(.{
-        .name = "spng",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-            .strip = strip,
-        }),
-    });
-    const spng_sources = [_][]const u8{
-        "third-party/spng.c",
-    };
-    spng.root_module.addCSourceFiles(.{
-        .files = &spng_sources,
-        .flags = if (flto) &cvvdp_flags ++ &[_][]const u8{"-flto=thin"} else &cvvdp_flags,
-    });
-    spng.root_module.addIncludePath(b.path("third-party/"));
+    const spng = b.dependency("spng", .{.target = target, .optimize = optimize, .zlib = zlib_opt, .strip = strip}).artifact("spng");
 
     // 'fcvvdp' executable
     const cvvdpenc = b.addExecutable(.{
@@ -89,7 +73,5 @@ pub fn build(b: *std.Build) void {
     cvvdpenc.root_module.addIncludePath(b.path("."));
     cvvdpenc.root_module.linkLibrary(cvvdp);
     cvvdpenc.root_module.linkLibrary(spng);
-    cvvdpenc.root_module.linkSystemLibrary("z_rs", .{ .preferred_link_mode = .static });
-    cvvdpenc.root_module.linkSystemLibrary("unwind", .{ .preferred_link_mode = .static });
     b.installArtifact(cvvdpenc);
 }
