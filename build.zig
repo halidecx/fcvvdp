@@ -48,7 +48,6 @@ pub fn build(b: *std.Build) void {
         "-Wpedantic",
         "-O3",
     };
-    cvvdp.root_module.linkSystemLibrary("m", .{ .preferred_link_mode = .static });
     cvvdp.root_module.addCSourceFiles(.{
         .files = &cvvdp_sources,
         .flags = if (flto) &cvvdp_flags ++ &[_][]const u8{"-flto=thin"} else &cvvdp_flags,
@@ -69,7 +68,6 @@ pub fn build(b: *std.Build) void {
     const spng_sources = [_][]const u8{
         "third-party/spng.c",
     };
-    spng.root_module.linkSystemLibrary("m", .{ .preferred_link_mode = .static });
     spng.root_module.addCSourceFiles(.{
         .files = &spng_sources,
         .flags = if (flto) &cvvdp_flags ++ &[_][]const u8{"-flto=thin"} else &cvvdp_flags,
