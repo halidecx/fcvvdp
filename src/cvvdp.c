@@ -777,8 +777,8 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* const c,
                     cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
                     for (size_t i = 0; i < lev_size; i++)
                         L_bkg_pyr[lev][i] = fmax(0.01f, expanded[i]);
-                }
-                cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
+                } else
+                    cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
                 for (size_t i = 0; i < lev_size; i++) {
                     const float contrast = (temp[i] - expanded[i]) /
                         fmax(0.01f, L_bkg_pyr[lev][i]);

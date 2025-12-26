@@ -16,25 +16,25 @@ multithreading.
 poop "cvvdp -r fm360p.y4m -t fm360p_x264.y4m --display standard_fhd" "./fcvvdp -m fhd fm360p.y4m fm360p_x264.y4m"
 Benchmark 1 (3 runs): cvvdp -r fm360p.y4m -t fm360p_x264.y4m --display standard_fhd
   measurement          mean ± σ            min … max           outliers         delta
-  wall_time          19.1s  ±  250ms    18.9s  … 19.4s           0 ( 0%)        0%
-  peak_rss           1.00GB ± 44.0MB     974MB … 1.05GB          0 ( 0%)        0%
-  cpu_cycles          752G  ± 10.9G      741G  …  763G           0 ( 0%)        0%
-  instructions        360G  ±  962M      360G  …  361G           0 ( 0%)        0%
-  cache_references   2.75G  ± 25.4M     2.72G  … 2.77G           0 ( 0%)        0%
-  cache_misses        897M  ± 13.6M      884M  …  911M           0 ( 0%)        0%
-  branch_misses       105M  ± 1.62M      103M  …  106M           0 ( 0%)        0%
+  wall_time          19.6s  ±  568ms    19.2s  … 20.2s           0 ( 0%)        0%
+  peak_rss           1.00GB ± 28.1MB     979MB … 1.03GB          0 ( 0%)        0%
+  cpu_cycles          747G  ± 8.54G      741G  …  757G           0 ( 0%)        0%
+  instructions        362G  ± 1.20G      361G  …  363G           0 ( 0%)        0%
+  cache_references   2.77G  ± 46.9M     2.71G  … 2.81G           0 ( 0%)        0%
+  cache_misses        899M  ± 11.7M      890M  …  912M           0 ( 0%)        0%
+  branch_misses       107M  ± 1.80M      105M  …  109M           0 ( 0%)        0%
 Benchmark 2 (3 runs): ./fcvvdp -m fhd fm360p.y4m fm360p_x264.y4m
   measurement          mean ± σ            min … max           outliers         delta
-  wall_time          16.3s  ± 45.3ms    16.3s  … 16.4s           0 ( 0%)        ⚡- 14.7% ±  2.1%
-  peak_rss           86.5MB ±  217KB    86.3MB … 86.7MB          0 ( 0%)        ⚡- 91.4% ±  7.0%
-  cpu_cycles         84.2G  ± 89.6M     84.1G  … 84.2G           0 ( 0%)        ⚡- 88.8% ±  2.3%
-  instructions        262G  ± 5.82M      262G  …  262G           0 ( 0%)        ⚡- 27.3% ±  0.4%
-  cache_references   1.49G  ± 5.25M     1.48G  … 1.49G           0 ( 0%)        ⚡- 45.8% ±  1.5%
-  cache_misses        370M  ± 1.90M      368M  …  372M           0 ( 0%)        ⚡- 58.7% ±  2.4%
-  branch_misses      8.48M  ± 49.3K     8.43M  … 8.53M           0 ( 0%)        ⚡- 91.9% ±  2.5%
+  wall_time          16.1s  ± 56.2ms    16.0s  … 16.1s           0 ( 0%)        ⚡- 17.9% ±  4.7%
+  peak_rss           86.7MB ±  109KB    86.6MB … 86.8MB          0 ( 0%)        ⚡- 91.4% ±  4.5%
+  cpu_cycles         82.8G  ± 80.9M     82.8G  … 82.9G           0 ( 0%)        ⚡- 88.9% ±  1.8%
+  instructions        255G  ± 30.0M      255G  …  255G           0 ( 0%)        ⚡- 29.6% ±  0.5%
+  cache_references   1.49G  ± 6.43M     1.49G  … 1.50G           0 ( 0%)        ⚡- 46.1% ±  2.7%
+  cache_misses        369M  ± 2.84M      365M  …  371M           0 ( 0%)        ⚡- 59.0% ±  2.2%
+  branch_misses      8.50M  ± 62.3K     8.45M  … 8.57M           0 ( 0%)        ⚡- 92.1% ±  2.7%
 ```
 
-fcvvdp uses 91% less RAM, 89% fewer CPU cycles, and is almost 15% faster in
+fcvvdp uses 91% less RAM, 88% fewer CPU cycles, and is almost 18% faster in
 terms of wall clock time. In terms of user time, fcvvdp is ~15x more efficient.
 
 ## Usage
