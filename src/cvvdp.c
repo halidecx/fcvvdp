@@ -181,8 +181,12 @@ static void cvvdp_gaussian_init(Gaussian* const gaussian) {
     }
 }
 
-static void cvvdp_gaussian_blur(const Gaussian* gaussian, const float* src,
-                         float* dst, int width, int height) {
+static void cvvdp_gaussian_blur(const Gaussian* gaussian,
+                                const float* src,
+                                float* const dst,
+                                const int width,
+                                const int height)
+{
     int ksize = CVVDP_GAUSSIAN_SIZE;
     float* temp = cvvdp_alloc_float((size_t)width * height);
     if (!temp) return;
@@ -225,7 +229,11 @@ static void cvvdp_gaussian_blur(const Gaussian* gaussian, const float* src,
 }
 
 // inverse real FFT for temporal filter generation
-static void cvvdp_inverse_rfft(const float* input, int input_size, float* output, int size) {
+static void cvvdp_inverse_rfft(const float* const input,
+                               const int input_size,
+                               float* const output,
+                               const int size)
+{
     float* inp = cvvdp_alloc_float(input_size);
     if (!inp) return;
 
@@ -237,16 +245,17 @@ static void cvvdp_inverse_rfft(const float* input, int input_size, float* output
 
     for (int i = 0; i < size; i++) {
         output[i] = 0.0f;
-        for (int k = 0; k < input_size; k++) {
-            int idx = (i + input_size - 1) % size;
-            output[idx] += 2.0f * inp[k] * cosf(2.0f * (float)M_PI * k * i / size) / size;
-        }
+        for (int k = 0; k < input_size; k++)
+            output[(i + input_size - 1) % size] +=
+                2.0f * inp[k] * cosf(2.0f * (float)M_PI * k * i / size) / size;
     }
 
     free(inp);
 }
 
-FcvvdpError cvvdp_temporal_filter_init(TemporalFilter* filter, float fps) {
+FcvvdpError cvvdp_temporal_filter_init(TemporalFilter *const filter,
+                                       const float fps)
+{
     if (fps <= 0)
         filter->size = 1;
     else {
@@ -298,7 +307,7 @@ FcvvdpError cvvdp_temporal_filter_init(TemporalFilter* filter, float fps) {
     return CVVDP_OK;
 }
 
-void cvvdp_temporal_filter_destroy(TemporalFilter* filter) {
+void cvvdp_temporal_filter_destroy(TemporalFilter* const filter) {
     for (int j = 0; j < 4; j++)
         if (filter->kernel[j]) {
             free(filter->kernel[j]);
@@ -306,7 +315,11 @@ void cvvdp_temporal_filter_destroy(TemporalFilter* filter) {
         }
 }
 
-FcvvdpError cvvdp_temporal_ring_init(TemporalRingBuf* ring, int width, int height, float fps) {
+FcvvdpError cvvdp_temporal_ring_init(TemporalRingBuf* const ring,
+                                     const int width,
+                                     const int height,
+                                     const float fps)
+{
     ring->width = width;
     ring->height = height;
     ring->num_frames = 0;
@@ -327,7 +340,7 @@ FcvvdpError cvvdp_temporal_ring_init(TemporalRingBuf* ring, int width, int heigh
     return CVVDP_OK;
 }
 
-void cvvdp_temporal_ring_destroy(TemporalRingBuf* ring) {
+void cvvdp_temporal_ring_destroy(TemporalRingBuf* const ring) {
     if (ring->data) {
         free(ring->data);
         ring->data = NULL;
@@ -335,26 +348,25 @@ void cvvdp_temporal_ring_destroy(TemporalRingBuf* ring) {
     cvvdp_temporal_filter_destroy(&ring->filter);
 }
 
-void cvvdp_temporal_ring_reset(TemporalRingBuf* ring) {
+void cvvdp_temporal_ring_reset(TemporalRingBuf* const ring) {
     ring->num_frames = 0;
     ring->current_index = 0;
 }
 
-float* cvvdp_temporal_ring_get_frame(TemporalRingBuf* ring, int age) {
+float* cvvdp_temporal_ring_get_frame(TemporalRingBuf* const ring, int age) {
     if (ring->num_frames == 0) return NULL;
 
-    if (age >= ring->num_frames) {
-        age = ring->num_frames - 1;
-    }
+    if (age >= ring->num_frames) age = ring->num_frames - 1;
 
-    size_t plane_size = (size_t)ring->width * ring->height * 3;
-    int idx = (ring->current_index + age) % ring->max_frames;
+    const size_t plane_size = (size_t)ring->width * ring->height * 3;
+    const int idx = (ring->current_index + age) % ring->max_frames;
     return ring->data + idx * plane_size;
 }
 
 void cvvdp_temporal_ring_push(TemporalRingBuf* ring, const float* frame) {
     ring->num_frames = imin(ring->max_frames, ring->num_frames + 1);
-    ring->current_index = (ring->current_index + ring->max_frames - 1) % ring->max_frames;
+    ring->current_index =
+        (ring->current_index + ring->max_frames - 1) % ring->max_frames;
 
     size_t plane_size = (size_t)ring->width * ring->height * 3;
     float* dst = ring->data + ring->current_index * plane_size;
@@ -376,7 +388,11 @@ void cvvdp_rgb_to_xyz(float* r, float* g, float* b, int count) {
     }
 }
 
-void cvvdp_xyz_to_dkl(float* x, float* y, float* z, int count) {
+void cvvdp_xyz_to_dkl(float *const x,
+                      float *const y,
+                      float* const z,
+                      const int count)
+{
     for (int i = 0; i < count; i++) {
         float xi = x[i], yi = y[i], zi = z[i];
 
