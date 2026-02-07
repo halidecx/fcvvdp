@@ -388,6 +388,13 @@ void cvvdp_rgb_to_xyz(float* r, float* g, float* b, int count) {
     }
 }
 
+void cvvdp_rgb_to_xyz_interleaved(float* const frame, const int count) {
+    float* const r = frame;
+    float* const g = frame + count;
+    float* const b = frame + 2 * count;
+    cvvdp_rgb_to_xyz(r, g, b, count);
+}
+
 void cvvdp_xyz_to_dkl(float *const x,
                       float *const y,
                       float* const z,
@@ -410,6 +417,13 @@ void cvvdp_xyz_to_dkl(float *const x,
         y[i] = rg;
         z[i] = yv;
     }
+}
+
+void cvvdp_xyz_to_dkl_interleaved(float* const frame, const int count) {
+    float* const x = frame;
+    float* const y = frame + count;
+    float* const z = frame + 2 * count;
+    cvvdp_xyz_to_dkl(x, y, z, count);
 }
 
 void cvvdp_apply_display_model(float* const plane,
@@ -436,12 +450,23 @@ void cvvdp_apply_display_model(float* const plane,
     }
 }
 
-FcvvdpError cvvdp_load_image(const FcvvdpImage* const img,
-                             float* const out_planes[3])
+void cvvdp_apply_display_model_interleaved(float* const frame,
+                                           const int count,
+                                           const Display *const display,
+                                           const bool is_hdr)
 {
-    if (!img || !img->data || !out_planes) return CVVDP_ERROR_NULL_POINTER;
+    cvvdp_apply_display_model(frame, count, display, is_hdr);
+    cvvdp_apply_display_model(frame + count, count, display, is_hdr);
+    cvvdp_apply_display_model(frame + 2 * count, count, display, is_hdr);
+}
+
+FcvvdpError cvvdp_load_image(const FcvvdpImage* const img,
+                             float* const frame)
+{
+    if (!img || !img->data || !frame) return CVVDP_ERROR_NULL_POINTER;
 
     const int w = img->width, h = img->height;
+    const size_t plane_size = (size_t)w * h;
     int stride = img->stride;
     if (stride == 0)
         switch (img->format) {
@@ -455,6 +480,10 @@ FcvvdpError cvvdp_load_image(const FcvvdpImage* const img,
                 stride = w * 3 * sizeof(uint16_t);
                 break;
         }
+
+    float* r_plane = frame;
+    float* g_plane = frame + plane_size;
+    float* b_plane = frame + 2 * plane_size;
 
     float r, g, b;
     for (int y = 0; y < h; y++)
@@ -475,7 +504,6 @@ FcvvdpError cvvdp_load_image(const FcvvdpImage* const img,
                     r = row[x * 3 + 0] / 255.0f;
                     g = row[x * 3 + 1] / 255.0f;
                     b = row[x * 3 + 2] / 255.0f;
-                    // sRGB gamma
                     r = (r < 0) ? -powf(-r, 2.4f) : powf(r, 2.4f);
                     g = (g < 0) ? -powf(-g, 2.4f) : powf(g, 2.4f);
                     b = (b < 0) ? -powf(-b, 2.4f) : powf(b, 2.4f);
@@ -492,9 +520,9 @@ FcvvdpError cvvdp_load_image(const FcvvdpImage* const img,
                 }
                 default: return CVVDP_ERROR_INVALID_FORMAT;
             }
-            out_planes[0][idx] = r;
-            out_planes[1][idx] = g;
-            out_planes[2][idx] = b;
+            r_plane[idx] = r;
+            g_plane[idx] = g;
+            b_plane[idx] = b;
         }
 
     return CVVDP_OK;
@@ -782,61 +810,68 @@ static FcvvdpError cvvdp_process_pyramid(FcvvdpCtx* const c,
         }
     }
 
+    float* buf_a = temp;
+    float* buf_b = reduced;
+
     for (int ch = 0; ch < 4; ch++) {
-        memcpy(temp, ref_channels[ch], (size_t)w * h * sizeof(float));
+        memcpy(buf_a, ref_channels[ch], (size_t)w * h * sizeof(float));
         int cw = w, ch_h = h;
         for (int lev = 0; lev < num_levels; lev++) {
             const size_t lev_size = (size_t)widths[lev] * heights[lev];
             if (lev < num_levels - 1) {
-                cvvdp_gauss_pyr_reduce(temp, reduced, cw, ch_h);
+                cvvdp_gauss_pyr_reduce(buf_a, buf_b, cw, ch_h);
                 if (!ch) {
-                    cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
+                    cvvdp_gauss_pyr_expand(buf_b, expanded, cw, ch_h);
                     for (size_t i = 0; i < lev_size; i++)
                         L_bkg_pyr[lev][i] = fmax(0.01f, expanded[i]);
                 } else
-                    cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
+                    cvvdp_gauss_pyr_expand(buf_b, expanded, cw, ch_h);
                 for (size_t i = 0; i < lev_size; i++) {
-                    const float contrast = (temp[i] - expanded[i]) /
+                    const float contrast = (buf_a[i] - expanded[i]) /
                         fmax(0.01f, L_bkg_pyr[lev][i]);
                     ref_pyr[lev][ch][i] = contrast * (lev == 0 ? 1.0f : 2.0f);
                 }
-                memcpy(temp, reduced,
-                       (size_t)((cw+1)/2) * ((ch_h+1)/2) * sizeof(float));
+                float* const t = buf_a;
+                buf_a = buf_b;
+                buf_b = t;
                 cw = (cw + 1) / 2;
                 ch_h = (ch_h + 1) / 2;
             } else {
                 if (!ch) {
                     float mean = 0.0f;
                     for (size_t i = 0; i < lev_size; i++)
-                        mean += temp[i];
+                        mean += buf_a[i];
                     mean /= lev_size;
                     L_bkg_pyr[lev][0] = fmax(0.01f, mean);
                 }
                 for (size_t i = 0; i < lev_size; i++)
-                    ref_pyr[lev][ch][i] = temp[i] /
+                    ref_pyr[lev][ch][i] = buf_a[i] /
                         fmax(0.01f, L_bkg_pyr[lev][0]);
             }
         }
 
-        memcpy(temp, dst_channels[ch], (size_t)w * h * sizeof(float));
+        buf_a = temp;
+        buf_b = reduced;
+        memcpy(buf_a, dst_channels[ch], (size_t)w * h * sizeof(float));
         cw = w; ch_h = h;
         for (int lev = 0; lev < num_levels; lev++) {
             const size_t lev_size = (size_t)widths[lev] * heights[lev];
             if (lev < num_levels - 1) {
-                cvvdp_gauss_pyr_reduce(temp, reduced, cw, ch_h);
-                cvvdp_gauss_pyr_expand(reduced, expanded, cw, ch_h);
+                cvvdp_gauss_pyr_reduce(buf_a, buf_b, cw, ch_h);
+                cvvdp_gauss_pyr_expand(buf_b, expanded, cw, ch_h);
                 for (size_t i = 0; i < lev_size; i++) {
-                    const float contrast = (temp[i] - expanded[i]) /
+                    const float contrast = (buf_a[i] - expanded[i]) /
                         fmax(0.01f, L_bkg_pyr[lev][i]);
                     dst_pyr[lev][ch][i] = contrast * (lev == 0 ? 1.0f : 2.0f);
                 }
-                memcpy(temp, reduced,
-                       (size_t)((cw+1)/2) * ((ch_h+1)/2) * sizeof(float));
+                float* const t = buf_a;
+                buf_a = buf_b;
+                buf_b = t;
                 cw = (cw + 1) / 2;
                 ch_h = (ch_h + 1) / 2;
             } else
                 for (size_t i = 0; i < lev_size; i++)
-                    dst_pyr[lev][ch][i] = temp[i] /
+                    dst_pyr[lev][ch][i] = buf_a[i] /
                         fmax(0.01f, L_bkg_pyr[lev][0]);
         }
     }
@@ -1139,92 +1174,45 @@ FcvvdpError cvvdp_process_frame(FcvvdpCtx* const c,
     }
 
     const size_t plane_size = (size_t)c->width * c->height;
-    float* const ref_planes[3] = {
-        cvvdp_alloc_float(plane_size),
-        cvvdp_alloc_float(plane_size),
-        cvvdp_alloc_float(plane_size)
-    };
-    float* const dst_planes[3] = {
-        cvvdp_alloc_float(plane_size),
-        cvvdp_alloc_float(plane_size),
-        cvvdp_alloc_float(plane_size)
-    };
-
-    if (!ref_planes[0] || !ref_planes[1] || !ref_planes[2] ||
-        !dst_planes[0] || !dst_planes[1] || !dst_planes[2])
-    {
-        for (int i = 0; i < 3; i++) {
-            free(ref_planes[i]);
-            free(dst_planes[i]);
-        }
-        return CVVDP_ERROR_OUT_OF_MEMORY;
-    }
-
-    FcvvdpError err = cvvdp_load_image(reference, ref_planes);
-    if (err != CVVDP_OK) {
-        for (int i = 0; i < 3; i++) {
-            free(ref_planes[i]);
-            free(dst_planes[i]);
-        }
-        return err;
-    }
-
-    err = cvvdp_load_image(distorted, dst_planes);
-    if (err != CVVDP_OK) {
-        for (int i = 0; i < 3; i++) {
-            free(ref_planes[i]);
-            free(dst_planes[i]);
-        }
-        return err;
-    }
-
-    const bool is_hdr = c->display.is_hdr;
-    for (int i = 0; i < 3; i++) {
-        cvvdp_apply_display_model(ref_planes[i], (int)plane_size,
-                                  &c->display, is_hdr);
-        cvvdp_apply_display_model(dst_planes[i], (int)plane_size,
-                                  &c->display, is_hdr);
-    }
-
-    cvvdp_rgb_to_xyz(ref_planes[0], ref_planes[1], ref_planes[2],
-                     (int)plane_size);
-    cvvdp_rgb_to_xyz(dst_planes[0], dst_planes[1], dst_planes[2],
-                     (int)plane_size);
-    cvvdp_xyz_to_dkl(ref_planes[0], ref_planes[1], ref_planes[2],
-                     (int)plane_size);
-    cvvdp_xyz_to_dkl(dst_planes[0], dst_planes[1], dst_planes[2],
-                     (int)plane_size);
 
     float* const ref_frame = cvvdp_alloc_float(plane_size * 3);
     float* const dst_frame = cvvdp_alloc_float(plane_size * 3);
     if (!ref_frame || !dst_frame) {
-        for (int i = 0; i < 3; i++) {
-            free(ref_planes[i]);
-            free(dst_planes[i]);
-        }
         free(ref_frame);
         free(dst_frame);
         return CVVDP_ERROR_OUT_OF_MEMORY;
     }
 
-    memcpy(ref_frame, ref_planes[0], plane_size * sizeof(float));
-    memcpy(ref_frame + plane_size, ref_planes[1], plane_size * sizeof(float));
-    memcpy(ref_frame + 2 * plane_size, ref_planes[2],
-           plane_size * sizeof(float));
-    memcpy(dst_frame, dst_planes[0], plane_size * sizeof(float));
-    memcpy(dst_frame + plane_size, dst_planes[1], plane_size * sizeof(float));
-    memcpy(dst_frame + 2 * plane_size, dst_planes[2],
-           plane_size * sizeof(float));
+    FcvvdpError err = cvvdp_load_image(reference, ref_frame);
+    if (err != CVVDP_OK) {
+        free(ref_frame);
+        free(dst_frame);
+        return err;
+    }
+
+    err = cvvdp_load_image(distorted, dst_frame);
+    if (err != CVVDP_OK) {
+        free(ref_frame);
+        free(dst_frame);
+        return err;
+    }
+
+    const bool is_hdr = c->display.is_hdr;
+    cvvdp_apply_display_model_interleaved(ref_frame, (int)plane_size,
+                                          &c->display, is_hdr);
+    cvvdp_apply_display_model_interleaved(dst_frame, (int)plane_size,
+                                          &c->display, is_hdr);
+
+    cvvdp_rgb_to_xyz_interleaved(ref_frame, (int)plane_size);
+    cvvdp_rgb_to_xyz_interleaved(dst_frame, (int)plane_size);
+    cvvdp_xyz_to_dkl_interleaved(ref_frame, (int)plane_size);
+    cvvdp_xyz_to_dkl_interleaved(dst_frame, (int)plane_size);
 
     cvvdp_temporal_ring_push(&c->ring_ref, ref_frame);
     cvvdp_temporal_ring_push(&c->ring_dis, dst_frame);
 
     free(ref_frame);
     free(dst_frame);
-    for (int i = 0; i < 3; i++) {
-        free(ref_planes[i]);
-        free(dst_planes[i]);
-    }
 
     float* const ref_Y_sus = cvvdp_alloc_float(plane_size);
     float* const ref_RG_sus = cvvdp_alloc_float(plane_size);
