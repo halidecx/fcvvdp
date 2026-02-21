@@ -261,9 +261,8 @@ fn printUsage() void {
         \\      output result as JSON
         \\  -h, --help
         \\      show this help message
-        \\
-        \\ sRGB PNG, PPM, PGM, PAM, or Y4M input expected
     , .{});
+    print("\n\n\x1b[37msRGB PNG, PPM, PGM, PAM, or Y4M input expected\x1b[0m\n", .{});
 }
 
 fn loadImage(allocator: std.mem.Allocator, path: []const u8) !Image {
