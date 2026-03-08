@@ -141,6 +141,7 @@ typedef struct FcvvdpResult {
  * @param height        Image height in pixels
  * @param fps           Frames per second (use 0 for single images)
  * @param display_model Display model preset
+ * @param threads       Number of worker threads
  * @param custom_params Custom display parameters (if CVVDP_DISPLAY_CUSTOM)
  * @param out_c         Output pointer to created context
  *
@@ -150,6 +151,7 @@ FcvvdpError cvvdp_create(const int width,
                          const int height,
                          const float fps,
                          const FcvvdpDisplayModel display_model,
+                         const unsigned threads,
                          const FcvvdpDisplayParams* const custom_params,
                          FcvvdpCtx** const out_c);
 
@@ -198,6 +200,7 @@ FcvvdpError cvvdp_reset(FcvvdpCtx* const c);
  * @param reference     Reference image
  * @param distorted     Distorted image
  * @param display_model Display model preset
+ * @param threads       Number of worker threads
  * @param custom_params Custom display parameters (only used if display_model is CVVDP_DISPLAY_CUSTOM)
  * @param result        Output result structure
  *
@@ -206,6 +209,7 @@ FcvvdpError cvvdp_reset(FcvvdpCtx* const c);
 FcvvdpError cvvdp_compare_images(const FcvvdpImage* const reference,
                                  const FcvvdpImage* const distorted,
                                  FcvvdpDisplayModel display_model,
+                                 const unsigned threads,
                                  const FcvvdpDisplayParams* const custom_params,
                                  FcvvdpResult* const result);
 

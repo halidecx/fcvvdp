@@ -23,6 +23,7 @@
 #include <math.h>
 
 static inline int imin(const int a, const int b) { return a < b ? a : b; }
+static inline int imax(const int a, const int b) { return a > b ? a : b; }
 
 static inline int iclip(const int v, const int min, const int max) {
     return v < min ? min : v > max ? max : v;

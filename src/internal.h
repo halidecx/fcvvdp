@@ -18,10 +18,14 @@
 #define FCVVDP_INTERNAL_H
 
 #include <stdlib.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include "cvvdp.h"
 #include "lut.h"
 
+#ifndef M_PI
 #define M_PI 3.14159265358979323846f
+#endif
 #define TAU (2.0 * M_PI)
 
 #define CVVDP_MAX_LEVELS 14 // maximum pyramid levels
@@ -29,10 +33,13 @@
 #define CVVDP_GAUSSIAN_SIZE 8 // gaussian kernel size
 #define CVVDP_NUM_CHANNELS 4 // number of color channels
 #define CVVDP_GAUSSIAN_SIZE 8 // Gaussian blur radius
+#define CVVDP_MAX_THREADS 32 // max thread cnt
 
 static const float GAUSS_PYR_KERNEL[5] = {
     0.25f - 0.4f/2.0f, 0.25f, 0.4f, 0.25f, 0.25f - 0.4f/2.0f
 };
+
+typedef void (*CvvdpTaskFn)(void* user_data, int start, int end);
 
 // display model
 typedef struct Display {
@@ -94,29 +101,22 @@ typedef struct Csf {
     int num_bands;
 } Csf;
 
-// laplacian pyramid level
-typedef struct PyramidLvl {
-    int width, height;
-    float frequency;
-
-    // 4 channels per level
-    float* data[4];
-} PyramidLvl;
-
-// laplacian pyramid
-typedef struct Pyramid {
-    PyramidLvl* levels;
-    int num_levels;
-    int base_width;
-    int base_height;
-    float ppd;
-} Pyramid;
-
-// gaussian blur handle
-typedef struct Gaussian {
-    float kernel[2 * CVVDP_GAUSSIAN_SIZE + 1];
-    float kernel_integral[2 * CVVDP_GAUSSIAN_SIZE + 2];
-} Gaussian;
+// thread pool
+typedef struct CvvdpThreadPool {
+    int worker_count;
+    pthread_t threads[CVVDP_MAX_THREADS - 1];
+    pthread_mutex_t mutex;
+    pthread_cond_t work_cond;
+    pthread_cond_t done_cond;
+    CvvdpTaskFn task;
+    void* task_data;
+    atomic_int next_index;
+    int item_count;
+    int chunk_size;
+    int generation;
+    int remaining;
+    bool stop;
+} CvvdpThreadPool;
 
 // cvvdp context
 typedef struct FcvvdpCtx {
@@ -129,7 +129,6 @@ typedef struct FcvvdpCtx {
     TemporalRingBuf ring_ref;
     TemporalRingBuf ring_dis;
     Csf csf;
-    Gaussian gaussian;
 
     // pyramid
     int num_bands;
@@ -141,13 +140,121 @@ typedef struct FcvvdpCtx {
 
     // work buffers
     float* work_buffer;
-    size_t work_buffer_size;
+
+    // task-thread pool
+    CvvdpThreadPool* thread_pool;
 
     // temp channel buffers
     float* Y_sustained;
     float* RG_sustained;
     float* YV_sustained;
     float* Y_transient;
+    float* dst_Y_sustained;
+    float* dst_RG_sustained;
+    float* dst_YV_sustained;
+    float* dst_Y_transient;
 } FcvvdpCtx;
+
+// -- task threading structs --
+
+typedef struct {
+    float* plane;
+    const Display* display;
+    bool is_hdr;
+} CvvdpApplyDisplayTaskData;
+
+typedef struct {
+    float* x;
+    float* y;
+    float* z;
+} CvvdpColorTransformTaskData;
+
+typedef struct CvvdpTemporalChannelsTaskData {
+    const TemporalRingBuf* ring;
+    float* Y_sus;
+    float* RG_sus;
+    float* YV_sus;
+    float* Y_trans;
+    size_t plane_size;
+} CvvdpTemporalChannelsTaskData;
+
+typedef struct CvvdpReduceTaskData {
+    const float* src;
+    float* dst;
+    int src_w;
+    int src_h;
+} CvvdpReduceTaskData;
+
+typedef struct CvvdpExpandTaskData {
+    const float* src;
+    float* dst;
+    int dst_w;
+    int dst_h;
+} CvvdpExpandTaskData;
+
+typedef struct CvvdpContrastTaskData {
+    const float* src;
+    const float* expanded;
+    float* L_bkg;
+    float* dst;
+    float contrast_scale;
+} CvvdpContrastTaskData;
+
+typedef struct CvvdpNormalizeTaskData {
+    const float* src;
+    float* dst;
+    float denom;
+} CvvdpNormalizeTaskData;
+
+typedef struct CvvdpCsfWeightTaskData {
+    const Csf* csf;
+    const float* L_bkg;
+    float* const* ref_level;
+    float* const* dst_level;
+    int lev;
+    size_t lev_size;
+    const float* ch_gain;
+} CvvdpCsfWeightTaskData;
+
+typedef struct CvvdpMinAbsTaskData {
+    const float* ref;
+    const float* dst;
+    float* out;
+} CvvdpMinAbsTaskData;
+
+typedef struct CvvdpBlurTaskData {
+    const float* src;
+    float* dst;
+    int width;
+    int height;
+    const float* kernel;
+    int radius;
+} CvvdpBlurTaskData;
+
+typedef struct CvvdpMaskedDiffTaskData {
+    float* const* blurred_min_abs;
+    float* const* ref_level;
+    float* const* dst_level;
+    float* d;
+    size_t lev_size;
+    float max_v;
+    float pow_mask_c;
+} CvvdpMaskedDiffTaskData;
+
+typedef struct CvvdpBasebandDiffTaskData {
+    const float* const* ref_level;
+    const float* const* dst_level;
+    float* d;
+    size_t lev_size;
+    float sensitivity[4];
+} CvvdpBasebandDiffTaskData;
+
+typedef struct CvvdpNormTaskData {
+    const float* data;
+    double* partials;
+    int count;
+    int participant_count;
+    int power;
+} CvvdpNormTaskData;
 
 #endif /* FCVVDP_INTERNAL_H */
