@@ -153,6 +153,18 @@ typedef struct FcvvdpCtx {
     float* dst_RG_sustained;
     float* dst_YV_sustained;
     float* dst_Y_transient;
+
+    // reusable pyramid scratch buffers
+    float* pyr_ref[CVVDP_MAX_LEVELS][CVVDP_NUM_CHANNELS];
+    float* pyr_dst[CVVDP_MAX_LEVELS][CVVDP_NUM_CHANNELS];
+    float* pyr_L_bkg[CVVDP_MAX_LEVELS];
+    float* pyr_temp;
+    float* pyr_reduced;
+    float* pyr_expanded;
+    float* pyr_min_abs[CVVDP_NUM_CHANNELS];
+    float* pyr_blurred_min_abs[CVVDP_NUM_CHANNELS];
+    float* pyr_tmp_blur;
+    float* pyr_d;
 } FcvvdpCtx;
 
 // -- task threading structs --
