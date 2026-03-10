@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 /* Version */
-static const char* CVVDP_VERSION = "0.1.1";
+static const char* CVVDP_VERSION = "0.2.0";
 
 /* Error codes */
 typedef enum FcvvdpError {

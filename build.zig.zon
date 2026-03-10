@@ -1,6 +1,6 @@
 .{
     .name = .fcvvdp,
-    .version = "0.1.1",
+    .version = "0.2.0",
     .fingerprint = 0xfe41744458a5e60e,
     .minimum_zig_version = "0.15.0",
     .paths = .{
