@@ -288,6 +288,7 @@ pub fn main() !void {
     var ref_filename: ?[]const u8 = null;
     var dis_filename: ?[]const u8 = null;
     var display_model: c_uint = @intCast(c.CVVDP_DISPLAY_STANDARD_FHD);
+    var threads: c_uint = 0;
     var verbose = false;
     var json_output = false;
 
@@ -304,6 +305,14 @@ pub fn main() !void {
                 display_model = parseDisplayModel(model_arg)
             else {
                 print("Error: Missing argument for --model\n", .{});
+                printUsage();
+                return error.InvalidArguments;
+            }
+        } else if ((std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, "--threads"))) {
+            if (args.next()) |thread_arg|
+                threads = try std.fmt.parseInt(c_uint, thread_arg, 10)
+            else {
+                print("Error: Missing argument for --threads\n", .{});
                 printUsage();
                 return error.InvalidArguments;
             }
@@ -390,7 +399,7 @@ pub fn main() !void {
             print("Computing CVVDP metric...\n", .{});
 
         var result: c.FcvvdpResult = undefined;
-        const err = c.cvvdp_compare_images(&ref_cvvdp, &dis_cvvdp, display_model, null, &result);
+        const err = c.cvvdp_compare_images(&ref_cvvdp, &dis_cvvdp, display_model, 1, null, &result);
 
         if (err != c.CVVDP_OK) {
             print("Error: CVVDP comparison failed: {s}\n", .{c.cvvdp_error_string(err)});
@@ -475,6 +484,7 @@ pub fn main() !void {
         @intCast(ref_dec.header.height),
         fps,
         display_model,
+        threads,
         null,
         &ctx_ptr,
     );
