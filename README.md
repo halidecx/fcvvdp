@@ -88,6 +88,33 @@ options:
 
 Library usage is clearly defined in `cvvdp.h`.
 
+### FFmpeg Patch
+
+0. Clone FFmpeg:
+```sh
+git clone https://code.ffmpeg.org/FFmpeg/FFmpeg.git ffmpeg
+cd ffmpeg
+git checkout n8.0
+```
+
+1. Apply patch (change path to point to your cloned copy of fcvvdp):
+```sh
+git apply ~/fcvvdp/patches/0001-feat-fcvvdp-support.patch
+```
+
+2. Configure & build FFmpeg:
+```sh
+./configure --enable-fcvvdp
+make -j$(nproc)
+```
+
+Example usage:
+```
+./ffmpeg -i src -i dst -lavfi "fcvvdp" -f null -
+```
+
+For more help, see `./ffmpeg --help filter=fcvvdp`.
+
 ## Credits
 
 `fcvvdp` is under the [Apache 2.0 License](LICENSE). `fcvvdp` is developed by
