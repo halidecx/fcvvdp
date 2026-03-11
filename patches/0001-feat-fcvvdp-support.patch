@@ -1,0 +1,686 @@
+From a2f55184e54c011db3fa452c259ed326d64fcd96 Mon Sep 17 00:00:00 2001
+From: Gianni Rosato <giannirosato@proton.me>
+Date: Wed, 11 Mar 2026 19:05:46 -0400
+Subject: [PATCH] feat: fcvvdp support
+
+---
+ configure                |   4 +
+ doc/filters.texi         | 123 ++++++++++
+ libavfilter/Makefile     |   1 +
+ libavfilter/allfilters.c |   1 +
+ libavfilter/vf_fcvvdp.c  | 469 +++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 598 insertions(+)
+ create mode 100644 libavfilter/vf_fcvvdp.c
+
+diff --git a/configure b/configure
+index 732de59292..4a7d828107 100755
+--- a/configure
++++ b/configure
+@@ -201,6 +201,7 @@ External library support:
+   --disable-bzlib          disable bzlib [autodetect]
+   --disable-coreimage      disable Apple CoreImage framework [autodetect]
+   --enable-chromaprint     enable audio fingerprinting with chromaprint [no]
++  --enable-fcvvdp          enable fcvvdp quality metric filter [no]
+   --enable-frei0r          enable frei0r video filtering [no]
+   --enable-gcrypt          enable gcrypt, needed for rtmp(t)e support
+                            if openssl, librtmp or gmp is not used [no]
+@@ -1920,6 +1921,7 @@ EXTERNAL_LIBRARY_LIST="
+     $EXTERNAL_LIBRARY_VERSION3_LIST
+     $EXTERNAL_LIBRARY_GPLV3_LIST
+     chromaprint
++    fcvvdp
+     gcrypt
+     gnutls
+     jni
+@@ -3957,6 +3959,7 @@ drawtext_filter_suggest="libfontconfig libfribidi"
+ elbg_filter_deps="avcodec"
+ eq_filter_deps="gpl"
+ erosion_opencl_filter_deps="opencl"
++fcvvdp_filter_deps="fcvvdp"
+ find_rect_filter_deps="avcodec avformat gpl"
+ flip_vulkan_filter_deps="vulkan spirv_compiler"
+ flite_filter_deps="libflite threads"
+@@ -7039,6 +7042,7 @@ enabled libdc1394         && require_pkg_config libdc1394 libdc1394-2 dc1394/dc1
+ enabled libdrm            && check_pkg_config libdrm libdrm xf86drm.h drmGetVersion
+ enabled libdvdnav         && require_pkg_config libdvdnav "dvdnav >= 6.1.1" dvdnav/dvdnav.h dvdnav_open2
+ enabled libdvdread        && require_pkg_config libdvdread "dvdread >= 6.1.2" dvdread/dvd_reader.h DVDOpen2
++enabled fcvvdp            && require fcvvdp cvvdp.h cvvdp_create -lcvvdp $libm_extralibs
+ enabled libfdk_aac        && { check_pkg_config libfdk_aac fdk-aac "fdk-aac/aacenc_lib.h" aacEncOpen ||
+                                { require libfdk_aac fdk-aac/aacenc_lib.h aacEncOpen -lfdk-aac &&
+                                  warn "using libfdk without pkg-config"; } }
+diff --git a/doc/filters.texi b/doc/filters.texi
+index 0b0663cd9d..e0a58ec7e9 100644
+--- a/doc/filters.texi
++++ b/doc/filters.texi
+@@ -13690,6 +13690,129 @@ fftfilt=dc_Y=0:weight_Y='exp(-4 * ((Y+X)/(W+H)))'
+ 
+ @end itemize
+ 
++@anchor{fcvvdp}
++@section fcvvdp
++
++Calculate the fcvvdp (Fast Color Video Visual Difference Predictor)
++between two input videos.
++
++This filter takes in input two input videos, the first input is
++considered the "main" source and is passed unchanged to the
++output. The second input is used as a "reference" video for computing
++the fcvvdp score.
++
++Both video inputs must have the same resolution and pixel format for
++this filter to work correctly. Also it assumes that both inputs
++have the same number of frames, which are compared one by one.
++
++The fcvvdp filter currently supports RGB pixel formats.
++
++The filter computes a perceptual quality score over the entire video
++sequence using temporal pooling. The final CVVDP score is printed
++through the logging system after all frames are processed.
++
++The filter outputs two metrics:
++
++@table @option
++@item JOD (Just-Objectionable-Difference)
++A perceptual quality score ranging from 0 to 10, where higher values
++indicate better quality. A JOD score of 0 means the distorted image
++is indistinguishable from the reference.
++
++@item Quality score
++An internal quality metric before the JOD transform.
++@end table
++
++The description of the accepted parameters follows.
++
++@table @option
++@item stats_file, f
++If specified the filter will use the named file to save the fcvvdp score
++of each individual frame. When filename equals "-" the data is sent to
++standard output.
++
++@item display_model
++Set the CVVDP display model to use for the quality computation.
++It accepts the following values:
++
++@table @samp
++@item standard_fhd
++24" FullHD, 200 nit, office lighting (default)
++
++@item standard_4k
++30" 4K, 200 nit, office lighting
++
++@item standard_hdr_pq
++30" 4K HDR, 1500 nit, low light with PQ transfer function
++
++@item standard_hdr_hlg
++30" 4K HDR, 1500 nit, low light with HLG transfer function
++
++@item standard_hdr_linear
++30" 4K HDR linear color space
++
++@item standard_hdr_dark
++30" 4K HDR dark room
++
++@item standard_hdr_linear_zoom
++30" 4K HDR linear (close viewing)
++@end table
++
++@item threads
++Set the number of worker threads for fcvvdp computation. Default value
++is 0, which uses the filter's default number of threads.
++@end table
++
++This filter also supports the @ref{framesync} options.
++
++The file printed if @var{stats_file} is selected, contains per-frame
++intermediate results in key/value pairs of the form @var{key}:@var{value}
++for each compared couple of frames. Note that these are intermediate
++accumulated scores as CVVDP uses temporal pooling.
++
++A description of each shown per-frame-pair parameter follows:
++
++@table @option
++@item n
++sequential number of the input frame, starting from 1
++
++@item jod
++The accumulated JOD (Just-Objectionable-Difference) score.
++
++@item quality
++The accumulated quality score.
++@end table
++
++Note: Due to temporal pooling, the scores at each frame represent the
++accumulated quality up to that point. The final score reported at the
++end of processing is the CVVDP score for the entire sequence.
++
++@subsection Examples
++@itemize
++@item
++For example:
++@example
++movie=ref_movie.mpg, setpts=PTS-STARTPTS [main];
++[main][ref] fcvvdp="stats_file=stats.log" [out]
++@end example
++
++On this example the input file being processed is compared with the
++reference file @file{ref_movie.mpg}. The fcvvdp score of each individual
++frame is stored in @file{stats.log}.
++
++@item
++Another example with different containers:
++@example
++ffmpeg -i main.mpg -i ref.mkv -lavfi "[0:v]settb=AVTB,setpts=PTS-STARTPTS[main];[1:v]settb=AVTB,setpts=PTS-STARTPTS[ref];[main][ref]fcvvdp" -f null -
++@end example
++
++@item
++Use HDR PQ display model:
++@example
++ffmpeg -i distorted.mp4 -i reference.mp4 -lavfi "fcvvdp=display_model=standard_hdr_pq" -f null -
++@end example
++@end itemize
++
+ @section field
+ 
+ Extract a single field from an interlaced image using stride
+diff --git a/libavfilter/Makefile b/libavfilter/Makefile
+index 07fb4c3d6c..3b2c7a3742 100644
+--- a/libavfilter/Makefile
++++ b/libavfilter/Makefile
+@@ -445,6 +445,7 @@ OBJS-$(CONFIG_PROCAMP_VAAPI_FILTER)          += vf_procamp_vaapi.o vaapi_vpp.o
+ OBJS-$(CONFIG_PROGRAM_OPENCL_FILTER)         += vf_program_opencl.o opencl.o framesync.o
+ OBJS-$(CONFIG_PSEUDOCOLOR_FILTER)            += vf_pseudocolor.o
+ OBJS-$(CONFIG_PSNR_FILTER)                   += vf_psnr.o framesync.o psnr.o
++OBJS-$(CONFIG_FCVVDP_FILTER)                 += vf_fcvvdp.o framesync.o
+ OBJS-$(CONFIG_PULLUP_FILTER)                 += vf_pullup.o
+ OBJS-$(CONFIG_QP_FILTER)                     += vf_qp.o
+ OBJS-$(CONFIG_QUIRC_FILTER)                  += vf_quirc.o
+diff --git a/libavfilter/allfilters.c b/libavfilter/allfilters.c
+index cca4ce0288..427766f357 100644
+--- a/libavfilter/allfilters.c
++++ b/libavfilter/allfilters.c
+@@ -416,6 +416,7 @@ extern const FFFilter ff_vf_procamp_vaapi;
+ extern const FFFilter ff_vf_program_opencl;
+ extern const FFFilter ff_vf_pseudocolor;
+ extern const FFFilter ff_vf_psnr;
++extern const FFFilter ff_vf_fcvvdp;
+ extern const FFFilter ff_vf_pullup;
+ extern const FFFilter ff_vf_qp;
+ extern const FFFilter ff_vf_qrencode;
+diff --git a/libavfilter/vf_fcvvdp.c b/libavfilter/vf_fcvvdp.c
+new file mode 100644
+index 0000000000..1bf1d6572f
+--- /dev/null
++++ b/libavfilter/vf_fcvvdp.c
+@@ -0,0 +1,469 @@
++/*
++ * Copyright (c) 2025
++ *
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++/**
++ * @file
++ * Calculate the CVVDP/fCVVDP score between two input videos.
++ */
++
++#include "config.h"
++
++#include <errno.h>
++#include <float.h>
++#include <stdio.h>
++#include <string.h>
++
++#include <cvvdp.h>
++
++#include "libavutil/avassert.h"
++#include "libavutil/avstring.h"
++#include "libavutil/file_open.h"
++#include "libavutil/mem.h"
++#include "libavutil/opt.h"
++#include "libavutil/pixdesc.h"
++#include "libavutil/intreadwrite.h"
++#include "libavutil/rational.h"
++
++#include "avfilter.h"
++#include "drawutils.h"
++#include "filters.h"
++#include "framesync.h"
++
++typedef struct FCVVDPContext {
++    const AVClass *class;
++    FFFrameSync fs;
++
++    FcvvdpCtx *cvvdp;
++    FcvvdpDisplayModel display_model;
++    int threads;
++
++    FILE *stats_file;
++    char *stats_file_str;
++
++    int width;
++    int height;
++    int nb_threads;
++    int nb_components;
++    int is_rgb;
++    int depth;
++    int bytes_per_component;
++    uint8_t rgba_map[4];
++    char comps[4];
++
++    uint8_t *ref_packed;
++    uint8_t *dist_packed;
++    int packed_stride;
++    size_t packed_buf_size;
++
++    FcvvdpResult last_result;
++    uint64_t nb_frames;
++} FCVVDPContext;
++
++#define OFFSET(x) offsetof(FCVVDPContext, x)
++#define FLAGS AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM
++
++static const AVOption fcvvdp_options[] = {
++    { "stats_file",     "Set file where to store per-frame FCVVDP information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str = NULL},                          0,                          0,                      FLAGS },
++    { "f",              "Set file where to store per-frame FCVVDP information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str = NULL},                          0,                          0,                      FLAGS },
++    { "display_model",  "Set the CVVDP display model",                          OFFSET(display_model),  AV_OPT_TYPE_INT,    {.i64 = CVVDP_DISPLAY_STANDARD_FHD},    CVVDP_DISPLAY_STANDARD_FHD, CVVDP_DISPLAY_CUSTOM,   FLAGS, .unit = "display_model" },
++    { "threads",        "Set the number of worker threads for FCVVDP",          OFFSET(threads),        AV_OPT_TYPE_INT,    {.i64 = 0},                             0,                          INT_MAX,                FLAGS },
++    { "standard_fhd",               NULL, 0, AV_OPT_TYPE_CONST, {.i64 = CVVDP_DISPLAY_STANDARD_FHD},                0, 0, FLAGS, .unit = "display_model" },
++    { "standard_4k",                NULL, 0, AV_OPT_TYPE_CONST, {.i64 = CVVDP_DISPLAY_STANDARD_4K},                 0, 0, FLAGS, .unit = "display_model" },
++    { "standard_hdr_pq",            NULL, 0, AV_OPT_TYPE_CONST, {.i64 = CVVDP_DISPLAY_STANDARD_HDR_PQ},             0, 0, FLAGS, .unit = "display_model" },
++    { "standard_hdr_hlg",           NULL, 0, AV_OPT_TYPE_CONST, {.i64 = CVVDP_DISPLAY_STANDARD_HDR_HLG},            0, 0, FLAGS, .unit = "display_model" },
++    { "standard_hdr_linear",        NULL, 0, AV_OPT_TYPE_CONST, {.i64 = CVVDP_DISPLAY_STANDARD_HDR_LINEAR},         0, 0, FLAGS, .unit = "display_model" },
++    { "standard_hdr_dark",          NULL, 0, AV_OPT_TYPE_CONST, {.i64 = CVVDP_DISPLAY_STANDARD_HDR_DARK},           0, 0, FLAGS, .unit = "display_model" },
++    { "standard_hdr_linear_zoom",   NULL, 0, AV_OPT_TYPE_CONST, {.i64 = CVVDP_DISPLAY_STANDARD_HDR_LINEAR_ZOOM},    0, 0, FLAGS, .unit = "display_model" },
++    { NULL }
++};
++
++FRAMESYNC_DEFINE_CLASS(fcvvdp, FCVVDPContext, fs);
++
++static void set_meta(AVDictionary **metadata, const char *key, double d)
++{
++    char value[128];
++    snprintf(value, sizeof(value), "%f", d);
++    av_dict_set(metadata, key, value, 0);
++}
++
++static const char *fcvvdp_error_string_safe(FcvvdpError err)
++{
++    const char *msg = cvvdp_error_string(err);
++    return msg ? msg : "unknown error";
++}
++
++static FcvvdpColorspace map_colorspace(const AVFrame *frame)
++{
++    if (frame->color_trc == AVCOL_TRC_ARIB_STD_B67)
++        return CVVDP_COLORSPACE_HLG;
++    if (frame->color_trc == AVCOL_TRC_SMPTE2084)
++        return CVVDP_COLORSPACE_PQ;
++    if (frame->color_trc == AVCOL_TRC_LINEAR)
++        return CVVDP_COLORSPACE_LINEAR;
++    return CVVDP_COLORSPACE_SRGB;
++}
++
++static enum FcvvdpPixFmt map_pixfmt(int depth)
++{
++    if (depth <= 8)
++        return CVVDP_PIXEL_FORMAT_RGB_UINT8;
++    if (depth <= 16)
++        return CVVDP_PIXEL_FORMAT_RGB_UINT16;
++    return CVVDP_PIXEL_FORMAT_RGB_FLOAT;
++}
++
++static int write_rgb8_packed(const AVFrame *frame, uint8_t *dst, int dst_stride,
++                             const AVPixFmtDescriptor *desc, const uint8_t rgba_map[4])
++{
++    const int width = frame->width;
++    const int height = frame->height;
++
++    for (int y = 0; y < height; y++) {
++        uint8_t *row = dst + (ptrdiff_t)y * dst_stride;
++        for (int x = 0; x < width; x++) {
++            for (int c = 0; c < 3; c++) {
++                const int plane = desc->comp[rgba_map[c]].plane;
++                const int step = desc->comp[rgba_map[c]].step;
++                const int offset = desc->comp[rgba_map[c]].offset;
++                row[x * 3 + c] = frame->data[plane][(ptrdiff_t)y * frame->linesize[plane] + x * step + offset];
++            }
++        }
++    }
++
++    return 0;
++}
++
++static int write_rgb16_packed(const AVFrame *frame, uint8_t *dst, int dst_stride,
++                              const AVPixFmtDescriptor *desc, const uint8_t rgba_map[4])
++{
++    const int width = frame->width;
++    const int height = frame->height;
++
++    for (int y = 0; y < height; y++) {
++        uint16_t *row = (uint16_t *)(dst + (ptrdiff_t)y * dst_stride);
++        for (int x = 0; x < width; x++) {
++            for (int c = 0; c < 3; c++) {
++                const int plane = desc->comp[rgba_map[c]].plane;
++                const int step = desc->comp[rgba_map[c]].step;
++                const int offset = desc->comp[rgba_map[c]].offset;
++                const uint8_t *srcp = frame->data[plane] + (ptrdiff_t)y * frame->linesize[plane] + x * step + offset;
++                row[x * 3 + c] = AV_RL16(srcp);
++            }
++        }
++    }
++
++    return 0;
++}
++
++static int pack_frame_rgb(const AVFrame *frame, uint8_t *dst, int dst_stride,
++                          const AVPixFmtDescriptor *desc, const uint8_t rgba_map[4],
++                          int bytes_per_component)
++{
++    if (bytes_per_component == 1)
++        return write_rgb8_packed(frame, dst, dst_stride, desc, rgba_map);
++    return write_rgb16_packed(frame, dst, dst_stride, desc, rgba_map);
++}
++
++static int do_fcvvdp(FFFrameSync *fs)
++{
++    AVFilterContext *ctx = fs->parent;
++    FCVVDPContext *s = ctx->priv;
++    AVFrame *dist, *ref;
++    AVDictionary **metadata;
++    const AVPixFmtDescriptor *desc;
++    FcvvdpImage ref_img;
++    FcvvdpImage dist_img;
++    FcvvdpError err;
++    int ret;
++
++    ret = ff_framesync_dualinput_get(fs, &dist, &ref);
++    if (ret < 0)
++        return ret;
++    if (ctx->is_disabled || !ref)
++        return ff_filter_frame(ctx->outputs[0], dist);
++
++    if (dist->width != ref->width || dist->height != ref->height) {
++        av_log(ctx, AV_LOG_ERROR, "Width and height of input videos must be same.\n");
++        return AVERROR(EINVAL);
++    }
++
++    if (dist->format != ref->format) {
++        av_log(ctx, AV_LOG_ERROR, "Pixel formats of input videos must be same.\n");
++        return AVERROR(EINVAL);
++    }
++
++    if (dist->color_range != ref->color_range) {
++        av_log(ctx, AV_LOG_WARNING,
++               "distorted and reference frames use different color ranges (%s != %s)\n",
++               av_color_range_name(dist->color_range),
++               av_color_range_name(ref->color_range));
++    }
++
++    desc = av_pix_fmt_desc_get(dist->format);
++    av_assert0(desc);
++
++    ret = pack_frame_rgb(ref, s->ref_packed, s->packed_stride, desc, s->rgba_map,
++                         s->bytes_per_component);
++    if (ret < 0) return ret;
++
++    ret = pack_frame_rgb(dist, s->dist_packed, s->packed_stride, desc, s->rgba_map,
++                         s->bytes_per_component);
++    if (ret < 0)
++        return ret;
++
++    ref_img.width = ref->width;
++    ref_img.height = ref->height;
++    ref_img.stride = s->packed_stride;
++    ref_img.data = s->ref_packed;
++    ref_img.format = map_pixfmt(s->depth);
++    ref_img.colorspace = map_colorspace(ref);
++
++    dist_img.width = dist->width;
++    dist_img.height = dist->height;
++    dist_img.stride = s->packed_stride;
++    dist_img.data = s->dist_packed;
++    dist_img.format = map_pixfmt(s->depth);
++    dist_img.colorspace = map_colorspace(dist);
++
++    err = cvvdp_process_frame(s->cvvdp, &ref_img, &dist_img, &s->last_result);
++    if (err != CVVDP_OK) {
++        av_log(ctx, AV_LOG_ERROR, "cvvdp_process_frame failed: %s\n",
++               fcvvdp_error_string_safe(err));
++        return AVERROR(EINVAL);
++    }
++
++    s->nb_frames++;
++
++    metadata = &dist->metadata;
++    set_meta(metadata, "lavfi.fcvvdp.jod", s->last_result.jod);
++    set_meta(metadata, "lavfi.fcvvdp.quality", s->last_result.quality);
++
++    if (s->stats_file) {
++        fprintf(s->stats_file, "n:%"PRIu64" jod:%0.6f quality:%0.6f\n",
++                s->nb_frames, s->last_result.jod, s->last_result.quality);
++    }
++
++    return ff_filter_frame(ctx->outputs[0], dist);
++}
++
++static av_cold int init(AVFilterContext *ctx)
++{
++    FCVVDPContext *s = ctx->priv;
++
++    if (s->stats_file_str) {
++        if (!strcmp(s->stats_file_str, "-")) {
++            s->stats_file = stdout;
++        } else {
++            s->stats_file = avpriv_fopen_utf8(s->stats_file_str, "w");
++            if (!s->stats_file) {
++                int err = AVERROR(errno);
++                av_log(ctx, AV_LOG_ERROR, "Could not open stats file %s: %s\n",
++                       s->stats_file_str, av_err2str(err));
++                return err;
++            }
++        }
++    }
++
++    s->fs.on_event = do_fcvvdp;
++    return 0;
++}
++
++static const enum AVPixelFormat pix_fmts[] = {
++    AV_PIX_FMT_GBRP,
++    AV_PIX_FMT_GBRP9,
++    AV_PIX_FMT_GBRP10,
++    AV_PIX_FMT_GBRP12,
++    AV_PIX_FMT_GBRP14,
++    AV_PIX_FMT_GBRP16,
++    AV_PIX_FMT_GBRAP,
++    AV_PIX_FMT_GBRAP10,
++    AV_PIX_FMT_GBRAP12,
++    AV_PIX_FMT_GBRAP16,
++    AV_PIX_FMT_RGB24,
++    AV_PIX_FMT_RGBA,
++    AV_PIX_FMT_RGB48LE,
++    AV_PIX_FMT_RGBA64LE,
++    AV_PIX_FMT_NONE
++};
++
++static int config_input_ref(AVFilterLink *inlink)
++{
++    AVFilterContext *ctx = inlink->dst;
++    FCVVDPContext *s = ctx->priv;
++    AVFilterLink *mainlink = ctx->inputs[0];
++    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
++    AVRational fps_q;
++    float fps;
++    FcvvdpError err;
++    int ret;
++
++    if (!desc) return AVERROR(EINVAL);
++
++    if (mainlink->w != inlink->w || mainlink->h != inlink->h) {
++        av_log(ctx, AV_LOG_ERROR, "Width and height of input videos must be same.\n");
++        return AVERROR(EINVAL);
++    }
++
++    if (mainlink->format != inlink->format) {
++        av_log(ctx, AV_LOG_ERROR, "Pixel formats of input videos must be same.\n");
++        return AVERROR(EINVAL);
++    }
++
++    s->is_rgb = ff_fill_rgba_map(s->rgba_map, inlink->format) >= 0;
++    if (!s->is_rgb) {
++        av_log(ctx, AV_LOG_ERROR,
++               "FCVVDP currently supports only RGB pixel formats in this filter implementation.\n");
++        return AVERROR(EINVAL);
++    }
++
++    s->nb_components = desc->nb_components;
++    s->depth = desc->comp[0].depth;
++    s->bytes_per_component = s->depth > 8 ? 2 : 1;
++    s->width = inlink->w;
++    s->height = inlink->h;
++    s->packed_stride = s->width * 3 * s->bytes_per_component;
++    s->packed_buf_size = (size_t)s->packed_stride * s->height;
++    s->nb_threads = ff_filter_get_nb_threads(ctx);
++
++    s->comps[0] = 'r';
++    s->comps[1] = 'g';
++    s->comps[2] = 'b';
++    s->comps[3] = 'a';
++
++    s->ref_packed = av_malloc(s->packed_buf_size);
++    s->dist_packed = av_malloc(s->packed_buf_size);
++    if (!s->ref_packed || !s->dist_packed)
++        return AVERROR(ENOMEM);
++
++    fps_q = ff_filter_link(mainlink)->frame_rate;
++    fps = fps_q.num > 0 && fps_q.den > 0 ? av_q2d(fps_q) : 0.0f;
++
++    err = cvvdp_create(s->width, s->height, fps,
++                       s->display_model,
++                       s->threads > 0 ? s->threads : s->nb_threads,
++                       NULL, &s->cvvdp);
++    if (err != CVVDP_OK) {
++        av_log(ctx, AV_LOG_ERROR, "cvvdp_create failed: %s\n",
++               fcvvdp_error_string_safe(err));
++        return AVERROR(EINVAL);
++    }
++
++    ret = 0;
++    return ret;
++}
++
++static int config_output(AVFilterLink *outlink)
++{
++    AVFilterContext *ctx = outlink->src;
++    FCVVDPContext *s = ctx->priv;
++    AVFilterLink *mainlink = ctx->inputs[0];
++    FilterLink *il = ff_filter_link(mainlink);
++    FilterLink *ol = ff_filter_link(outlink);
++    int ret;
++
++    ret = ff_framesync_init_dualinput(&s->fs, ctx);
++    if (ret < 0) return ret;
++
++    outlink->w = mainlink->w;
++    outlink->h = mainlink->h;
++    outlink->time_base = mainlink->time_base;
++    outlink->sample_aspect_ratio = mainlink->sample_aspect_ratio;
++    ol->frame_rate = il->frame_rate;
++
++    if ((ret = ff_framesync_configure(&s->fs)) < 0)
++        return ret;
++
++    outlink->time_base = s->fs.time_base;
++
++    if (av_cmp_q(mainlink->time_base, outlink->time_base) ||
++        av_cmp_q(ctx->inputs[1]->time_base, outlink->time_base))
++        av_log(ctx, AV_LOG_WARNING,
++               "not matching timebases found between first input: %d/%d and second input %d/%d, results may be incorrect!\n",
++               mainlink->time_base.num, mainlink->time_base.den,
++               ctx->inputs[1]->time_base.num, ctx->inputs[1]->time_base.den);
++
++    return 0;
++}
++
++static int activate(AVFilterContext *ctx)
++{
++    FCVVDPContext *s = ctx->priv;
++    return ff_framesync_activate(&s->fs);
++}
++
++static av_cold void uninit(AVFilterContext *ctx)
++{
++    FCVVDPContext *s = ctx->priv;
++
++    if (s->nb_frames > 0) {
++        av_log(ctx, AV_LOG_INFO,
++               "FCVVDP jod:%f quality:%f frames:%"PRIu64"\n",
++               s->last_result.jod, s->last_result.quality, s->nb_frames);
++    }
++
++    ff_framesync_uninit(&s->fs);
++
++    if (s->cvvdp) {
++        cvvdp_destroy(s->cvvdp);
++        s->cvvdp = NULL;
++    }
++
++    av_freep(&s->ref_packed);
++    av_freep(&s->dist_packed);
++
++    if (s->stats_file && s->stats_file != stdout)
++        fclose(s->stats_file);
++}
++
++static const AVFilterPad fcvvdp_inputs[] = {
++    {
++        .name = "main",
++        .type = AVMEDIA_TYPE_VIDEO,
++    },
++    {
++        .name = "reference",
++        .type = AVMEDIA_TYPE_VIDEO,
++        .config_props = config_input_ref,
++    },
++};
++
++static const AVFilterPad fcvvdp_outputs[] = {
++    {
++        .name = "default",
++        .type = AVMEDIA_TYPE_VIDEO,
++        .config_props = config_output,
++    },
++};
++
++const FFFilter ff_vf_fcvvdp = {
++    .p.name        = "fcvvdp",
++    .p.description = NULL_IF_CONFIG_SMALL("Calculate the FCVVDP between two video streams."),
++    .p.priv_class  = &fcvvdp_class,
++    .p.flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |
++                     AVFILTER_FLAG_METADATA_ONLY,
++    .preinit       = fcvvdp_framesync_preinit,
++    .init          = init,
++    .uninit        = uninit,
++    .activate      = activate,
++    .priv_size     = sizeof(FCVVDPContext),
++    FILTER_INPUTS(fcvvdp_inputs),
++    FILTER_OUTPUTS(fcvvdp_outputs),
++    FILTER_PIXFMTS_ARRAY(pix_fmts),
++};
+-- 
+2.53.0
+
