@@ -49,15 +49,17 @@ multiple threads, fcvvdp is over 221% faster than the reference implementation.
 
 Compilation requires:
 
-- [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs)
-- [libunwind](https://github.com/libunwind/libunwind)
+- _Optional_ [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs)
+- _Optional_ [libunwind](https://github.com/libunwind/libunwind)
 - [Zig](https://ziglang.org/) 0.15.x
 - macOS, Linux, or Unix-like operating system
 
 ### Binary
 
 0. Ensure all dependencies are installed
-1. Run `zig build --release=fast` (add `-Dflto=true` for FLTO)
+1. Run `zig build --release=fast`
+   - add `-Dflto=true` for FLTO
+   - add `-Dlibz-rs=true` for zlib-rs
 2. Your `fcvvdp` binary will be in `zig-out/bin/`
 
 ```sh
@@ -91,6 +93,7 @@ Library usage is clearly defined in `cvvdp.h`.
 ### FFmpeg Patch
 
 0. Clone FFmpeg:
+
 ```sh
 git clone https://code.ffmpeg.org/FFmpeg/FFmpeg.git ffmpeg
 cd ffmpeg
@@ -98,17 +101,20 @@ git checkout n8.0
 ```
 
 1. Apply patch (change path to point to your cloned copy of fcvvdp):
+
 ```sh
 git apply ~/fcvvdp/patches/0001-feat-fcvvdp-support.patch
 ```
 
 2. Configure & build FFmpeg:
+
 ```sh
 ./configure --enable-fcvvdp
 make -j$(nproc)
 ```
 
 Example usage:
+
 ```
 ./ffmpeg -i src -i dst -lavfi "fcvvdp" -f null -
 ```
