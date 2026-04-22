@@ -162,7 +162,8 @@ pub fn loadY4MFirstFrameAsRGB(allocator: std.mem.Allocator, io: std.Io, path: []
     const file = try std.Io.Dir.cwd().openFile(io, path, .{});
     defer file.close(io);
 
-    var dec = try y4m.Decoder.init(allocator, io, file);
+    var dec: y4m.Decoder = undefined;
+    try dec.init(allocator, io, file);
     defer dec.deinit();
 
     const frame_opt = try dec.readFrame();
@@ -446,7 +447,8 @@ pub fn main(init: std.process.Init) !void {
 
     const ref_file = try std.Io.Dir.cwd().openFile(io, ref_filename.?, .{});
     defer ref_file.close(io);
-    var ref_dec = try y4m.Decoder.init(allocator, io, ref_file);
+    var ref_dec: y4m.Decoder = undefined;
+    try ref_dec.init(allocator, io, ref_file);
     defer ref_dec.deinit();
 
     if (verbose and !json_output)
@@ -454,7 +456,8 @@ pub fn main(init: std.process.Init) !void {
 
     const dis_file = try std.Io.Dir.cwd().openFile(io, dis_filename.?, .{});
     defer dis_file.close(io);
-    var dis_dec = try y4m.Decoder.init(allocator, io, dis_file);
+    var dis_dec: y4m.Decoder = undefined;
+    try dis_dec.init(allocator, io, dis_file);
     defer dis_dec.deinit();
 
     if (ref_dec.header.width != dis_dec.header.width or ref_dec.header.height != dis_dec.header.height) {

@@ -74,32 +74,31 @@ pub const Header = struct {
 
 pub const Decoder = struct {
     allocator: std.mem.Allocator,
-    io: std.Io,
     file: std.Io.File,
-    offset: u64,
+    file_reader: std.Io.File.Reader,
+    buffer: [4096]u8,
 
     header: Header,
     /// Bytes per frame payload (excluding "FRAME\n" line).
     frame_bytes: usize,
 
-    /// Scratch buffer for reading header/frame lines.
-    line_buf: [4096]u8,
-
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, file: std.Io.File) !Decoder {
-        var d: Decoder = .{
+    /// The caller must pass a pointer to a `Decoder` already at its final
+    /// memory location so that the internal reader's buffer pointer remains
+    /// valid after initialization.
+    pub fn init(self: *Decoder, allocator: std.mem.Allocator, io: std.Io, file: std.Io.File) !void {
+        self.* = .{
             .allocator = allocator,
-            .io = io,
             .file = file,
-            .offset = 0,
+            .file_reader = undefined,
+            .buffer = undefined,
             .header = .{ .width = 0, .height = 0 },
             .frame_bytes = 0,
-            .line_buf = undefined,
         };
 
-        try d.readStreamHeader();
-        d.frame_bytes = computeFrameBytes(d.header);
+        self.file_reader = file.reader(io, &self.buffer);
 
-        return d;
+        try self.readStreamHeader();
+        self.frame_bytes = computeFrameBytes(self.header);
     }
 
     pub fn deinit(self: *Decoder) void {
@@ -110,12 +109,15 @@ pub const Decoder = struct {
     /// Returns null on clean EOF (no partial frame).
     pub fn readFrame(self: *Decoder) !?Frame {
         // Read and validate the FRAME header line.
-        const line = try self.readLineOrEof();
+        const line = self.file_reader.interface.takeDelimiter('\n') catch |err| switch (err) {
+            error.StreamTooLong => return error.LineTooLong,
+            else => |e| return e,
+        };
         if (line == null) return null;
 
         if (!std.mem.startsWith(u8, line.?, "FRAME")) return error.BadFrameMarker;
         // Y4M frame line is "FRAME" optionally followed by space-separated tags, then '\n'.
-        // We ignore tags, but we must have ended at '\n' already via readLineOrEof.
+        // We ignore tags, but we must have ended at '\n' already via takeDelimiter.
 
         // Read planes
         const w = self.header.width;
@@ -149,7 +151,10 @@ pub const Decoder = struct {
     }
 
     fn readStreamHeader(self: *Decoder) !void {
-        const line_opt = try self.readLineOrEof();
+        const line_opt = self.file_reader.interface.takeDelimiter('\n') catch |err| switch (err) {
+            error.StreamTooLong => return error.LineTooLong,
+            else => |e| return e,
+        };
         if (line_opt == null) return error.UnexpectedEof;
 
         const line = line_opt.?;
@@ -236,38 +241,11 @@ pub const Decoder = struct {
         }
     }
 
-    fn readLineOrEof(self: *Decoder) !?[]const u8 {
-        var index: usize = 0;
-
-        while (true) {
-            var byte_buf: [1]u8 = undefined;
-            const n = try self.file.readPositionalAll(self.io, &byte_buf, self.offset);
-            if (n == 0) {
-                if (index == 0) return null;
-                // EOF mid-line: treat as error (header/frame lines must end with '\n')
-                return error.UnexpectedEof;
-            }
-            self.offset += 1;
-            const b = byte_buf[0];
-
-            if (b == '\n') break;
-            // Spec: lines are ASCII, but we keep raw bytes.
-            if (index >= self.line_buf.len) return error.LineTooLong;
-            self.line_buf[index] = b;
-            index += 1;
-        }
-
-        return self.line_buf[0..index];
-    }
-
     fn readExact(self: *Decoder, buf: []u8) !void {
-        var total: usize = 0;
-        while (total < buf.len) {
-            const n = try self.file.readPositionalAll(self.io, buf[total..], self.offset + total);
-            if (n == 0) return error.UnexpectedEof;
-            total += n;
-        }
-        self.offset += total;
+        self.file_reader.interface.readSliceAll(buf) catch |err| switch (err) {
+            error.EndOfStream => return error.UnexpectedEof,
+            else => |e| return e,
+        };
     }
 };
 
