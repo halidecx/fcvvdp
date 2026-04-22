@@ -37,6 +37,11 @@ pub inline fn requantize16to8(x: u16) u8 {
     return @intCast((t + (t >> 16)) >> 16);
 }
 
+inline fn requantize10to8(x: u16) u8 {
+    const t: u32 = @as(u32, x) * 255 + 512;
+    return @intCast((t + (t >> 10)) >> 10);
+}
+
 pub fn loadPNG(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !Image {
     const file = try std.Io.Dir.cwd().openFile(io, path, .{});
     defer file.close(io);
@@ -133,10 +138,10 @@ fn yuv420ToRgb8FromFrame(allocator: std.mem.Allocator, frame: y4m.Frame) ![]u8 {
 
         for (0..height) |yy| {
             for (0..width) |xx| {
-                // Downshift from 10-bit to 8-bit by dropping low bits.
-                const yv: i32 = @intCast(y16[yy * width + xx] >> 2);
-                const uv: i32 = @intCast(u_plane16[(yy / 2) * cw + (xx / 2)] >> 2);
-                const vv: i32 = @intCast(v_plane16[(yy / 2) * cw + (xx / 2)] >> 2);
+                // Requantize from 10-bit to 8-bit.
+                const yv: i32 = @intCast(requantize10to8(y16[yy * width + xx]));
+                const uv: i32 = @intCast(requantize10to8(u_plane16[(yy / 2) * cw + (xx / 2)]));
+                const vv: i32 = @intCast(requantize10to8(v_plane16[(yy / 2) * cw + (xx / 2)]));
 
                 const u_off = uv - 128;
                 const v_off = vv - 128;

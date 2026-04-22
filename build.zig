@@ -22,7 +22,6 @@ pub fn build(b: *std.Build) void {
     const libz_rs = b.option(bool, "libz-rs", "compile with libz-rs instead of libz, defaults to false") orelse false;
     const options = b.addOptions();
 
-    // Translate C headers (replaces @cImport)
     const translate_c = b.addTranslateC(.{
         .root_source_file = b.path("c_imports.h"),
         .target = target,
