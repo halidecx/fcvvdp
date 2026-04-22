@@ -29,16 +29,16 @@ pub const PAMLoadError = error{
     OutOfMemory,
 };
 
-pub fn loadPAM(allocator: std.mem.Allocator, path: []const u8) PAMLoadError!Image {
-    const file = std.fs.cwd().openFile(path, .{}) catch return error.FileOpenFailed;
-    defer file.close();
+pub fn loadPAM(allocator: std.mem.Allocator, io: std.Io, path: []const u8) PAMLoadError!Image {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return error.FileOpenFailed;
+    defer file.close(io);
 
-    const file_size = file.getEndPos() catch return error.ReadFailed;
+    const file_size = file.length(io) catch return error.ReadFailed;
 
     const file_buffer = allocator.alloc(u8, file_size) catch return error.OutOfMemory;
     defer allocator.free(file_buffer);
 
-    const bytes_read = file.readAll(file_buffer) catch return error.ReadFailed;
+    const bytes_read = file.readPositionalAll(io, file_buffer, 0) catch return error.ReadFailed;
     if (bytes_read != file_size) return error.ReadFailed;
 
     const end_header_idx = std.mem.indexOf(u8, file_buffer, "ENDHDR\n") orelse return error.HeaderNotFound;
@@ -75,7 +75,7 @@ pub fn loadPAM(allocator: std.mem.Allocator, path: []const u8) PAMLoadError!Imag
             if (value_it.next()) |value|
                 maxval = std.fmt.parseInt(usize, value, 10) catch return error.UnsupportedMaxValue;
         } else if (std.mem.startsWith(u8, line, "TUPLTYPE")) {
-            const value = std.mem.trimLeft(u8, line[8..], " \t");
+            const value = std.mem.trim(u8, line[8..], " \t");
             if (value.len > 0) tupltype = value;
         }
     }

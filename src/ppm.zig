@@ -54,15 +54,15 @@ fn readToken(data: []const u8, pos: *usize) ?[]const u8 {
     return data[start..pos.*];
 }
 
-pub fn loadPPM(allocator: std.mem.Allocator, path: []const u8) PPMLoadError!Image {
-    const file = std.fs.cwd().openFile(path, .{}) catch return error.FileOpenFailed;
-    defer file.close();
+pub fn loadPPM(allocator: std.mem.Allocator, io: std.Io, path: []const u8) PPMLoadError!Image {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return error.FileOpenFailed;
+    defer file.close(io);
 
-    const file_size = file.getEndPos() catch return error.ReadFailed;
+    const file_size = file.length(io) catch return error.ReadFailed;
     const file_buffer = allocator.alloc(u8, file_size) catch return error.OutOfMemory;
     defer allocator.free(file_buffer);
 
-    const bytes_read = file.readAll(file_buffer) catch return error.ReadFailed;
+    const bytes_read = file.readPositionalAll(io, file_buffer, 0) catch return error.ReadFailed;
     if (bytes_read != file_size) return error.ReadFailed;
 
     var pos: usize = 0;

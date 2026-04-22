@@ -46,19 +46,19 @@ pub const Frame = struct {
     pub fn yAsU16LE(self: Frame) ![]align(1) const u16 {
         if (self.bit_depth != .b10) return error.WrongBitDepth;
         if ((self.y.len & 1) != 0) return error.BadPlaneSize;
-        const ptr = @as(*align(1) const [0]u16, @ptrCast(self.y.ptr));
+        const ptr: [*]align(1) const u16 = @ptrCast(self.y.ptr);
         return ptr[0 .. self.y.len / 2];
     }
     pub fn uAsU16LE(self: Frame) ![]align(1) const u16 {
         if (self.bit_depth != .b10) return error.WrongBitDepth;
         if ((self.u.len & 1) != 0) return error.BadPlaneSize;
-        const ptr = @as(*align(1) const [0]u16, @ptrCast(self.u.ptr));
+        const ptr: [*]align(1) const u16 = @ptrCast(self.u.ptr);
         return ptr[0 .. self.u.len / 2];
     }
     pub fn vAsU16LE(self: Frame) ![]align(1) const u16 {
         if (self.bit_depth != .b10) return error.WrongBitDepth;
         if ((self.v.len & 1) != 0) return error.BadPlaneSize;
-        const ptr = @as(*align(1) const [0]u16, @ptrCast(self.v.ptr));
+        const ptr: [*]align(1) const u16 = @ptrCast(self.v.ptr);
         return ptr[0 .. self.v.len / 2];
     }
 };
@@ -74,9 +74,9 @@ pub const Header = struct {
 
 pub const Decoder = struct {
     allocator: std.mem.Allocator,
-    file: std.fs.File,
-    reader: std.fs.File.Reader,
-    buffer: [4096]u8,
+    io: std.Io,
+    file: std.Io.File,
+    offset: u64,
 
     header: Header,
     /// Bytes per frame payload (excluding "FRAME\n" line).
@@ -85,18 +85,16 @@ pub const Decoder = struct {
     /// Scratch buffer for reading header/frame lines.
     line_buf: [4096]u8,
 
-    pub fn init(allocator: std.mem.Allocator, file: std.fs.File) !Decoder {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, file: std.Io.File) !Decoder {
         var d: Decoder = .{
             .allocator = allocator,
+            .io = io,
             .file = file,
-            .buffer = undefined,
-            .reader = undefined,
+            .offset = 0,
             .header = .{ .width = 0, .height = 0 },
             .frame_bytes = 0,
             .line_buf = undefined,
         };
-
-        d.reader = file.reader(&d.buffer);
 
         try d.readStreamHeader();
         d.frame_bytes = computeFrameBytes(d.header);
@@ -135,9 +133,9 @@ pub const Decoder = struct {
         const v = try self.allocator.alloc(u8, c_bytes);
         errdefer self.allocator.free(v);
 
-        try readExact(self.file, y);
-        try readExact(self.file, u);
-        try readExact(self.file, v);
+        try self.readExact(y);
+        try self.readExact(u);
+        try self.readExact(v);
 
         return Frame{
             .width = w,
@@ -243,12 +241,13 @@ pub const Decoder = struct {
 
         while (true) {
             var byte_buf: [1]u8 = undefined;
-            const n = try self.file.read(&byte_buf);
+            const n = try self.file.readPositionalAll(self.io, &byte_buf, self.offset);
             if (n == 0) {
                 if (index == 0) return null;
                 // EOF mid-line: treat as error (header/frame lines must end with '\n')
                 return error.UnexpectedEof;
             }
+            self.offset += 1;
             const b = byte_buf[0];
 
             if (b == '\n') break;
@@ -259,6 +258,16 @@ pub const Decoder = struct {
         }
 
         return self.line_buf[0..index];
+    }
+
+    fn readExact(self: *Decoder, buf: []u8) !void {
+        var total: usize = 0;
+        while (total < buf.len) {
+            const n = try self.file.readPositionalAll(self.io, buf[total..], self.offset + total);
+            if (n == 0) return error.UnexpectedEof;
+            total += n;
+        }
+        self.offset += total;
     }
 };
 
@@ -291,15 +300,6 @@ fn bytesPerSample(bit_depth: BitDepth) usize {
 
 fn planeBytes(bit_depth: BitDepth, width: usize, height: usize) usize {
     return width * height * bytesPerSample(bit_depth);
-}
-
-fn readExact(file: std.fs.File, buf: []u8) !void {
-    var off: usize = 0;
-    while (off < buf.len) {
-        const n = try file.read(buf[off..]);
-        if (n == 0) return error.UnexpectedEof;
-        off += n;
-    }
 }
 
 fn parseUsize(s: []const u8) !usize {

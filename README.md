@@ -51,7 +51,7 @@ Compilation requires:
 
 - _Optional_ [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs)
 - _Optional_ [libunwind](https://github.com/libunwind/libunwind)
-- [Zig](https://ziglang.org/) 0.15.x
+- [Zig](https://ziglang.org/) 0.16.x
 - macOS, Linux, or Unix-like operating system
 
 ### Binary

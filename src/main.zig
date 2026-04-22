@@ -16,10 +16,7 @@ const std = @import("std");
 const y4m = @import("y4m.zig");
 const ppm = @import("ppm.zig");
 const pam = @import("pam.zig");
-const c = @cImport({
-    @cInclude("third-party/spng.h");
-    @cInclude("src/cvvdp.h");
-});
+const c = @import("c");
 
 const print = std.debug.print;
 
@@ -40,13 +37,13 @@ pub inline fn requantize16to8(x: u16) u8 {
     return @intCast((t + (t >> 16)) >> 16);
 }
 
-pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const size = try file.getEndPos();
+pub fn loadPNG(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !Image {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+    const size = try file.length(io);
     const buf = try allocator.alloc(u8, size);
     defer allocator.free(buf);
-    _ = try file.readAll(buf);
+    _ = try file.readPositionalAll(io, buf, 0);
 
     const ctx = c.spng_ctx_new(0);
     if (ctx == null) return error.FailedCreateContext;
@@ -161,11 +158,11 @@ fn yuv420ToRgb8FromFrame(allocator: std.mem.Allocator, frame: y4m.Frame) ![]u8 {
     return rgb;
 }
 
-pub fn loadY4MFirstFrameAsRGB(allocator: std.mem.Allocator, path: []const u8) !Image {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+pub fn loadY4MFirstFrameAsRGB(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !Image {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
-    var dec = try y4m.Decoder.init(allocator, file);
+    var dec = try y4m.Decoder.init(allocator, io, file);
     defer dec.deinit();
 
     const frame_opt = try dec.readFrame();
@@ -265,24 +262,23 @@ fn printUsage() void {
     print("\n\n\x1b[37msRGB PNG, PPM, PGM, PAM, or Y4M input expected\x1b[0m\n", .{});
 }
 
-fn loadImage(allocator: std.mem.Allocator, path: []const u8) !Image {
+fn loadImage(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !Image {
     if (hasExtension(path, ".png"))
-        return loadPNG(allocator, path)
+        return loadPNG(allocator, io, path)
     else if (ppm.isPPM(path))
-        return try ppm.loadPPM(allocator, path)
+        return try ppm.loadPPM(allocator, io, path)
     else if (pam.isPAM(path))
-        return try pam.loadPAM(allocator, path)
+        return try pam.loadPAM(allocator, io, path)
     else
         return error.UnsupportedFileFormat;
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
     print("\x1b[38;5;208mfcvvdp\x1b[0m by Halide Compression, LLC | {s}\n", .{c.cvvdp_version_string()});
 
-    var args = std.process.args();
+    var args = std.process.Args.iterate(init.minimal.args);
     _ = args.next();
 
     var ref_filename: ?[]const u8 = null;
@@ -350,13 +346,13 @@ pub fn main() !void {
         if (verbose and !json_output)
             print("Loading reference: {s}\n", .{ref_filename.?});
 
-        var ref_img = try loadImage(allocator, ref_filename.?);
+        var ref_img = try loadImage(allocator, io, ref_filename.?);
         defer ref_img.deinit(allocator);
 
         if (verbose and !json_output)
             print("Loading distorted: {s}\n", .{dis_filename.?});
 
-        var dis_img = try loadImage(allocator, dis_filename.?);
+        var dis_img = try loadImage(allocator, io, dis_filename.?);
         defer dis_img.deinit(allocator);
 
         if (ref_img.width != dis_img.width or ref_img.height != dis_img.height) {
@@ -448,17 +444,17 @@ pub fn main() !void {
     if (verbose and !json_output)
         print("Opening reference video: {s}\n", .{ref_filename.?});
 
-    const ref_file = try std.fs.cwd().openFile(ref_filename.?, .{});
-    defer ref_file.close();
-    var ref_dec = try y4m.Decoder.init(allocator, ref_file);
+    const ref_file = try std.Io.Dir.cwd().openFile(io, ref_filename.?, .{});
+    defer ref_file.close(io);
+    var ref_dec = try y4m.Decoder.init(allocator, io, ref_file);
     defer ref_dec.deinit();
 
     if (verbose and !json_output)
         print("Opening distorted video: {s}\n", .{dis_filename.?});
 
-    const dis_file = try std.fs.cwd().openFile(dis_filename.?, .{});
-    defer dis_file.close();
-    var dis_dec = try y4m.Decoder.init(allocator, dis_file);
+    const dis_file = try std.Io.Dir.cwd().openFile(io, dis_filename.?, .{});
+    defer dis_file.close(io);
+    var dis_dec = try y4m.Decoder.init(allocator, io, dis_file);
     defer dis_dec.deinit();
 
     if (ref_dec.header.width != dis_dec.header.width or ref_dec.header.height != dis_dec.header.height) {

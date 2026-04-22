@@ -22,6 +22,16 @@ pub fn build(b: *std.Build) void {
     const libz_rs = b.option(bool, "libz-rs", "compile with libz-rs instead of libz, defaults to false") orelse false;
     const options = b.addOptions();
 
+    // Translate C headers (replaces @cImport)
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("c_imports.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    translate_c.addIncludePath(b.path("."));
+    const c_module = translate_c.createModule();
+
     // 'libcvvdp.a' static lib
     const cvvdp = b.addLibrary(.{
         .name = "cvvdp",
@@ -83,6 +93,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     cvvdpenc.root_module.addOptions("build_opts", options);
+    cvvdpenc.root_module.addImport("c", c_module);
     cvvdpenc.root_module.addIncludePath(b.path("."));
     cvvdpenc.root_module.linkLibrary(cvvdp);
     cvvdpenc.root_module.linkLibrary(spng);
