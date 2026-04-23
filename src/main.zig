@@ -257,6 +257,8 @@ fn printUsage() void {
         \\  -m, --model <name>
         \\      display model to use (fhd, 4k, hdr_pq, hdr_hlg, hdr_linear,
         \\      hdr_dark, hdr_zoom); default: fhd
+        \\  -t, --threads u8
+        \\      task thread count (0=auto..INT_MAX); default 0
         \\  -v, --verbose
         \\      show verbose output with display parameters
         \\  -j, --json
