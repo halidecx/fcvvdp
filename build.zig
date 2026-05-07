@@ -19,8 +19,14 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const strip = b.option(bool, "strip", "strip symbols from the binary, defaults to false") orelse false;
     const flto = b.option(bool, "flto", "enable Link Time Optimization, defaults to false") orelse false;
-    const libz_rs = b.option(bool, "libz-rs", "compile with libz-rs instead of libz, defaults to false") orelse false;
     const options = b.addOptions();
+
+    // libspng
+    const spng_dep = b.dependency("spng", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const spng = spng_dep.artifact("spng");
 
     const translate_c = b.addTranslateC(.{
         .root_source_file = b.path("c_imports.h"),
@@ -29,6 +35,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     translate_c.addIncludePath(b.path("."));
+    translate_c.addIncludePath(spng.getEmittedIncludeTree());
     const c_module = translate_c.createModule();
 
     // 'libcvvdp.a' static lib
@@ -61,25 +68,6 @@ pub fn build(b: *std.Build) void {
     // cvvdp.h
     cvvdp.installHeader(b.path("src/cvvdp.h"), "cvvdp.h");
 
-    // libspng
-    const spng = b.addLibrary(.{
-        .name = "spng",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-            .strip = strip,
-        }),
-    });
-    const spng_sources = [_][]const u8{
-        "third-party/spng.c",
-    };
-    spng.root_module.addCSourceFiles(.{
-        .files = &spng_sources,
-        .flags = if (flto) &cvvdp_flags ++ &[_][]const u8{"-flto=thin"} else &cvvdp_flags,
-    });
-    spng.root_module.addIncludePath(b.path("third-party/"));
-
     // 'fcvvdp' executable
     const cvvdpenc = b.addExecutable(.{
         .name = "fcvvdp",
@@ -96,9 +84,5 @@ pub fn build(b: *std.Build) void {
     cvvdpenc.root_module.addIncludePath(b.path("."));
     cvvdpenc.root_module.linkLibrary(cvvdp);
     cvvdpenc.root_module.linkLibrary(spng);
-    if (libz_rs) {
-        cvvdpenc.root_module.linkSystemLibrary("z_rs", .{ .preferred_link_mode = .static });
-        cvvdpenc.root_module.linkSystemLibrary("unwind", .{ .preferred_link_mode = .static });
-    } else cvvdpenc.root_module.linkSystemLibrary("z", .{ .preferred_link_mode = .static });
     b.installArtifact(cvvdpenc);
 }

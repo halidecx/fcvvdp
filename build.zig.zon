@@ -1,6 +1,12 @@
 .{
     .name = .fcvvdp,
     .version = "0.2.3",
+    .dependencies = .{
+        .spng = .{
+            .url = "git+https://github.com/allyourcodebase/libspng.git#8858232bde47083739c3e25f676093423610ec5e",
+            .hash = "spng-0.0.1-T166cP8UAABcBGTOPKx7kUUyHEcu0eDvN8LnSIj3S_cW",
+        },
+    },
     .fingerprint = 0xfe41744458a5e60e,
     .minimum_zig_version = "0.16.0",
     .paths = .{
