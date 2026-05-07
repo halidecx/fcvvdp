@@ -215,21 +215,48 @@ pub fn toRGB8(allocator: std.mem.Allocator, img: Image) ![]u8 {
 }
 
 fn parseDisplayModel(name: []const u8) c.FcvvdpDisplayModel {
-    if (std.mem.eql(u8, name, "fhd")) {
-        return c.CVVDP_DISPLAY_STANDARD_FHD;
-    } else if (std.mem.eql(u8, name, "4k")) {
-        return c.CVVDP_DISPLAY_STANDARD_4K;
-    } else if (std.mem.eql(u8, name, "hdr_pq")) {
-        return c.CVVDP_DISPLAY_STANDARD_HDR_PQ;
-    } else if (std.mem.eql(u8, name, "hdr_hlg")) {
-        return c.CVVDP_DISPLAY_STANDARD_HDR_HLG;
-    } else if (std.mem.eql(u8, name, "hdr_linear")) {
-        return c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR;
-    } else if (std.mem.eql(u8, name, "hdr_dark")) {
-        return c.CVVDP_DISPLAY_STANDARD_HDR_DARK;
-    } else if (std.mem.eql(u8, name, "hdr_zoom")) {
-        return c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR_ZOOM;
+    const models = [_]struct { []const u8, c.FcvvdpDisplayModel }{
+        .{ "fhd", c.CVVDP_DISPLAY_STANDARD_FHD },
+        .{ "standard_fhd", c.CVVDP_DISPLAY_STANDARD_FHD },
+        .{ "4k", c.CVVDP_DISPLAY_STANDARD_4K },
+        .{ "standard_4k", c.CVVDP_DISPLAY_STANDARD_4K },
+        .{ "hdr_pq", c.CVVDP_DISPLAY_STANDARD_HDR_PQ },
+        .{ "standard_hdr_pq", c.CVVDP_DISPLAY_STANDARD_HDR_PQ },
+        .{ "hdr_hlg", c.CVVDP_DISPLAY_STANDARD_HDR_HLG },
+        .{ "standard_hdr_hlg", c.CVVDP_DISPLAY_STANDARD_HDR_HLG },
+        .{ "hdr_linear", c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR },
+        .{ "standard_hdr_linear", c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR },
+        .{ "hdr_dark", c.CVVDP_DISPLAY_STANDARD_HDR_DARK },
+        .{ "standard_hdr_linear_dark", c.CVVDP_DISPLAY_STANDARD_HDR_DARK },
+        .{ "hdr_zoom", c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR_ZOOM },
+        .{ "standard_hdr_linear_zoom", c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR_ZOOM },
+        .{ "standard_hmd", c.CVVDP_DISPLAY_STANDARD_HMD },
+        .{ "standard_phone", c.CVVDP_DISPLAY_STANDARD_PHONE },
+        .{ "sdr_4k_30", c.CVVDP_DISPLAY_SDR_4K_30 },
+        .{ "sdr_fhd_24", c.CVVDP_DISPLAY_SDR_FHD_24 },
+        .{ "htc_vive_pro", c.CVVDP_DISPLAY_HTC_VIVE_PRO },
+        .{ "iphone_12_pro", c.CVVDP_DISPLAY_IPHONE_12_PRO },
+        .{ "iphone_14_pro", c.CVVDP_DISPLAY_IPHONE_14_PRO },
+        .{ "iphone_14_pro_vert", c.CVVDP_DISPLAY_IPHONE_14_PRO_VERT },
+        .{ "iphone_14_pro_hdr", c.CVVDP_DISPLAY_IPHONE_14_PRO_HDR },
+        .{ "iphone_14_pro_hdr_vert", c.CVVDP_DISPLAY_IPHONE_14_PRO_HDR_VERT },
+        .{ "ipad_pro_12_9", c.CVVDP_DISPLAY_IPAD_PRO_12_9 },
+        .{ "macbook_pro_16", c.CVVDP_DISPLAY_MACBOOK_PRO_16 },
+        .{ "lg_oled_2017_sdr", c.CVVDP_DISPLAY_LG_OLED_2017_SDR },
+        .{ "lg_oled_2017_hdr", c.CVVDP_DISPLAY_LG_OLED_2017_HDR },
+        .{ "eizo_CG3146", c.CVVDP_DISPLAY_EIZO_CG3146 },
+        .{ "65inch_hdr_pq_4knit", c.CVVDP_DISPLAY_65INCH_HDR_PQ_4KNIT },
+        .{ "65inch_hdr_pq_2Knit", c.CVVDP_DISPLAY_65INCH_HDR_PQ_2KNIT },
+        .{ "65inch_hdr_pq_2knit", c.CVVDP_DISPLAY_65INCH_HDR_PQ_2KNIT },
+        .{ "65inch_hdr_pq_1Knit", c.CVVDP_DISPLAY_65INCH_HDR_PQ_1KNIT },
+        .{ "65inch_hdr_pq_1knit", c.CVVDP_DISPLAY_65INCH_HDR_PQ_1KNIT },
+        .{ "lg_oled_2026_hdr_pq", c.CVVDP_DISPLAY_LG_OLED_2026_HDR_PQ },
+    };
+
+    inline for (models) |model| {
+        if (std.mem.eql(u8, name, model[0])) return model[1];
     }
+
     return c.CVVDP_DISPLAY_STANDARD_FHD; // default
 }
 
@@ -242,6 +269,25 @@ fn displayModelName(model: c.FcvvdpDisplayModel) []const u8 {
         c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR => "Standard HDR Linear (30\" 4K, 1500 cd/m², low light)",
         c.CVVDP_DISPLAY_STANDARD_HDR_DARK => "Standard HDR Dark (30\" 4K, 1500 cd/m², dark room)",
         c.CVVDP_DISPLAY_STANDARD_HDR_LINEAR_ZOOM => "Standard HDR Zoom (30\" 4K, 10000 cd/m², close viewing)",
+        c.CVVDP_DISPLAY_STANDARD_HMD => "Standard HMD (110° FOV, 1440x1600)",
+        c.CVVDP_DISPLAY_STANDARD_PHONE => "Standard Phone (6\", 500 cd/m²)",
+        c.CVVDP_DISPLAY_SDR_4K_30 => "SDR 4K 30\" (100 cd/m², office lighting)",
+        c.CVVDP_DISPLAY_SDR_FHD_24 => "SDR FHD 24\" (100 cd/m², office lighting)",
+        c.CVVDP_DISPLAY_HTC_VIVE_PRO => "HTC Vive Pro",
+        c.CVVDP_DISPLAY_IPHONE_12_PRO => "iPhone 12 Pro",
+        c.CVVDP_DISPLAY_IPHONE_14_PRO => "iPhone 14 Pro",
+        c.CVVDP_DISPLAY_IPHONE_14_PRO_VERT => "iPhone 14 Pro Vertical",
+        c.CVVDP_DISPLAY_IPHONE_14_PRO_HDR => "iPhone 14 Pro HDR",
+        c.CVVDP_DISPLAY_IPHONE_14_PRO_HDR_VERT => "iPhone 14 Pro HDR Vertical",
+        c.CVVDP_DISPLAY_IPAD_PRO_12_9 => "iPad Pro 12.9",
+        c.CVVDP_DISPLAY_MACBOOK_PRO_16 => "MacBook Pro 16",
+        c.CVVDP_DISPLAY_LG_OLED_2017_SDR => "LG OLED 2017 SDR",
+        c.CVVDP_DISPLAY_LG_OLED_2017_HDR => "LG OLED 2017 HDR",
+        c.CVVDP_DISPLAY_EIZO_CG3146 => "EIZO Prominence CG3146 31\"",
+        c.CVVDP_DISPLAY_65INCH_HDR_PQ_4KNIT => "65-inch HDR PQ 4Knit",
+        c.CVVDP_DISPLAY_65INCH_HDR_PQ_2KNIT => "65-inch HDR PQ 2Knit",
+        c.CVVDP_DISPLAY_65INCH_HDR_PQ_1KNIT => "65-inch HDR PQ 1Knit",
+        c.CVVDP_DISPLAY_LG_OLED_2026_HDR_PQ => "65-inch LG OLED G6 2026 HDR",
         else => "Unknown",
     };
 }
@@ -255,8 +301,9 @@ fn printUsage() void {
         \\
         \\options:
         \\  -m, --model <name>
-        \\      display model to use (fhd, 4k, hdr_pq, hdr_hlg, hdr_linear,
-        \\      hdr_dark, hdr_zoom); default: fhd
+        \\      display model to use; accepts short names (fhd, 4k, hdr_pq,
+        \\      hdr_hlg, hdr_linear, hdr_dark, hdr_zoom) or preset JSON keys;
+        \\      default: fhd
         \\  -t, --threads u8
         \\      task thread count (0=auto..INT_MAX); default 0
         \\  -v, --verbose

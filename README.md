@@ -71,8 +71,9 @@ compare two images/videos using the CVVDP perceptual quality metric
 
 options:
   -m, --model <name>
-      display model to use (fhd, 4k, hdr_pq, hdr_hlg, hdr_linear,
-      hdr_dark, hdr_zoom); default: fhd
+      display model to use; accepts short names (fhd, 4k, hdr_pq,
+      hdr_hlg, hdr_linear, hdr_dark, hdr_zoom) or preset JSON keys;
+      default: fhd
   -v, --verbose
       show verbose output with display parameters
   -j, --json

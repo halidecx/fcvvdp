@@ -31,6 +31,35 @@ Available display model presets include:
 | `hdr_dark`   | 30" 4K HDR, 1500 cd/m², dark room                        |
 | `hdr_zoom`   | 30" 4K HDR, 10000 cd/m², close viewing                   |
 
+The CLI also accepts the full preset keys:
+
+- `standard_fhd`
+- `standard_4k`
+- `standard_hdr_pq`
+- `standard_hdr_hlg`
+- `standard_hdr_linear`
+- `standard_hdr_linear_dark`
+- `standard_hdr_linear_zoom`
+- `standard_hmd`
+- `standard_phone`
+- `sdr_4k_30`
+- `sdr_fhd_24`
+- `htc_vive_pro`
+- `iphone_12_pro`
+- `iphone_14_pro`
+- `iphone_14_pro_vert`,
+- `iphone_14_pro_hdr`
+- `iphone_14_pro_hdr_vert`
+- `ipad_pro_12_9`
+- `macbook_pro_16`
+- `lg_oled_2017_sdr`
+- `lg_oled_2017_hdr`
+- `eizo_CG3146`
+- `65inch_hdr_pq_4knit`
+- `65inch_hdr_pq_2Knit`
+- `65inch_hdr_pq_1Knit`
+- `lg_oled_2026_hdr_pq`
+
 ## Input Loading and Display Mapping
 
 - Input images (uint8, uint16, or float) are converted to linear float RGB. If

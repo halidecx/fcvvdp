@@ -221,6 +221,36 @@ static float cvvdp_compute_ppd(const Display* display) {
     return 1.0f / pix_deg;
 }
 
+static float cvvdp_diagonal_inches_from_fov(const float viewing_dist_meters,
+                                            const float fov_diag_deg)
+{
+    const float fov_rad = fov_diag_deg * (float)M_PI / 180.0f;
+    const float diagonal_meters =
+        2.0f * viewing_dist_meters * tanf(fov_rad * 0.5f);
+    return diagonal_meters / 0.0254f;
+}
+
+static void cvvdp_set_display(Display* const display,
+                              const int resolution_width,
+                              const int resolution_height,
+                              const float viewing_distance_meters,
+                              const float diagonal_size_inches,
+                              const float max_luminance,
+                              const float contrast,
+                              const float ambient_light,
+                              const bool is_hdr)
+{
+    display->resolution_width = resolution_width;
+    display->resolution_height = resolution_height;
+    display->viewing_distance_meters = viewing_distance_meters;
+    display->diagonal_size_inches = diagonal_size_inches;
+    display->max_luminance = max_luminance;
+    display->contrast = contrast;
+    display->ambient_light = ambient_light;
+    display->reflectivity = 0.005f;
+    display->is_hdr = is_hdr;
+}
+
 static void cvvdp_init_display(Display* const display,
                                const FcvvdpDisplayModel model,
                                const FcvvdpDisplayParams* custom)
@@ -240,66 +270,105 @@ static void cvvdp_init_display(Display* const display,
     } else {
         switch (model) {
             case CVVDP_DISPLAY_STANDARD_4K:
-                display->resolution_width = 3840;
-                display->resolution_height = 2160;
-                display->viewing_distance_meters = 0.7472f;
-                display->diagonal_size_inches = 30.0f;
-                display->max_luminance = 200.0f;
-                display->contrast = 1000.0f;
-                display->ambient_light = 250.0f;
-                display->reflectivity = 0.005f;
-                display->is_hdr = false;
+                cvvdp_set_display(display, 3840, 2160, 0.7472f, 30.0f,
+                                  200.0f, 1000.0f, 250.0f, false);
                 break;
-
             case CVVDP_DISPLAY_STANDARD_HDR_PQ:
             case CVVDP_DISPLAY_STANDARD_HDR_HLG:
             case CVVDP_DISPLAY_STANDARD_HDR_LINEAR:
-                display->resolution_width = 3840;
-                display->resolution_height = 2160;
-                display->viewing_distance_meters = 0.7472f;
-                display->diagonal_size_inches = 30.0f;
-                display->max_luminance = 1500.0f;
-                display->contrast = 1000000.0f;
-                display->ambient_light = 10.0f;
-                display->reflectivity = 0.005f;
-                display->is_hdr = true;
+                cvvdp_set_display(display, 3840, 2160, 0.7472f, 30.0f,
+                                  1500.0f, 1000000.0f, 10.0f, true);
                 break;
-
             case CVVDP_DISPLAY_STANDARD_HDR_DARK:
-                display->resolution_width = 3840;
-                display->resolution_height = 2160;
-                display->viewing_distance_meters = 0.7472f;
-                display->diagonal_size_inches = 30.0f;
-                display->max_luminance = 1500.0f;
-                display->contrast = 1000000.0f;
-                display->ambient_light = 0.0f;
-                display->reflectivity = 0.005f;
-                display->is_hdr = true;
+                cvvdp_set_display(display, 3840, 2160, 0.7472f, 30.0f,
+                                  1500.0f, 1000000.0f, 0.0f, true);
                 break;
-
             case CVVDP_DISPLAY_STANDARD_HDR_LINEAR_ZOOM:
-                display->resolution_width = 3840;
-                display->resolution_height = 2160;
-                display->viewing_distance_meters = 0.25f;
-                display->diagonal_size_inches = 30.0f;
-                display->max_luminance = 10000.0f;
-                display->contrast = 1000000.0f;
-                display->ambient_light = 10.0f;
-                display->reflectivity = 0.005f;
-                display->is_hdr = true;
+                cvvdp_set_display(display, 3840, 2160, 0.25f, 30.0f,
+                                  10000.0f, 1000000.0f, 10.0f, true);
                 break;
-
+            case CVVDP_DISPLAY_STANDARD_HMD:
+                cvvdp_set_display(display, 1440, 1600, 3.0f,
+                                  cvvdp_diagonal_inches_from_fov(3.0f, 110.0f),
+                                  100.0f, 1000.0f, 0.0f, false);
+                break;
+            case CVVDP_DISPLAY_STANDARD_PHONE:
+                cvvdp_set_display(display, 2400, 1080, 0.4f, 6.0f, 500.0f,
+                                  10000.0f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_SDR_4K_30:
+                cvvdp_set_display(display, 3840, 2160, 0.6f, 30.0f, 100.0f,
+                                  1000.0f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_SDR_FHD_24:
+                cvvdp_set_display(display, 1920, 1080, 0.6f, 24.0f, 100.0f,
+                                  1000.0f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_HTC_VIVE_PRO:
+                cvvdp_set_display(display, 1440, 1600, 3.0f,
+                                  cvvdp_diagonal_inches_from_fov(3.0f, 110.0f),
+                                  133.3f, 1333.0f, 0.0f, false);
+                break;
+            case CVVDP_DISPLAY_IPHONE_12_PRO:
+                cvvdp_set_display(display, 2532, 1170, 0.508f, 6.1f, 825.0f,
+                                  2062500.0f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_IPHONE_14_PRO:
+                cvvdp_set_display(display, 2532, 1170, 0.508f, 6.1f, 1025.0f,
+                                  2562500.0f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_IPHONE_14_PRO_VERT:
+                cvvdp_set_display(display, 1170, 2532, 0.508f, 6.1f, 1025.0f,
+                                  2562500.0f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_IPHONE_14_PRO_HDR:
+                cvvdp_set_display(display, 2532, 1170, 0.508f, 6.1f, 1590.0f,
+                                  3975000.0f, 10.0f, true);
+                break;
+            case CVVDP_DISPLAY_IPHONE_14_PRO_HDR_VERT:
+                cvvdp_set_display(display, 1170, 2532, 0.508f, 6.1f, 1590.0f,
+                                  3975000.0f, 10.0f, true);
+                break;
+            case CVVDP_DISPLAY_IPAD_PRO_12_9:
+                cvvdp_set_display(display, 2732, 2048, 0.508f, 12.9f, 600.0f,
+                                  1621.6216f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_MACBOOK_PRO_16:
+                cvvdp_set_display(display, 3072, 1920, 0.635f, 16.0f, 500.0f,
+                                  1351.3513f, 250.0f, false);
+                break;
+            case CVVDP_DISPLAY_LG_OLED_2017_SDR:
+                cvvdp_set_display(display, 3840, 2160, 2.5654f, 64.5f, 272.0f,
+                                  19428.57f, 100.0f, false);
+                break;
+            case CVVDP_DISPLAY_LG_OLED_2017_HDR:
+                cvvdp_set_display(display, 3840, 2160, 2.5654f, 64.5f, 754.0f,
+                                  19842.105f, 100.0f, true);
+                break;
+            case CVVDP_DISPLAY_EIZO_CG3146:
+                cvvdp_set_display(display, 4096, 2160, 0.73406f, 31.063f,
+                                  300.0f, 3000.0f, 0.0f, false);
+                break;
+            case CVVDP_DISPLAY_65INCH_HDR_PQ_4KNIT:
+                cvvdp_set_display(display, 3840, 2160, 1.98f, 65.0f, 4000.0f,
+                                  1000000.0f, 5.0f, true);
+                break;
+            case CVVDP_DISPLAY_65INCH_HDR_PQ_2KNIT:
+                cvvdp_set_display(display, 3840, 2160, 1.98f, 65.0f, 2000.0f,
+                                  1000000.0f, 5.0f, true);
+                break;
+            case CVVDP_DISPLAY_65INCH_HDR_PQ_1KNIT:
+                cvvdp_set_display(display, 3840, 2160, 1.98f, 65.0f, 1000.0f,
+                                  1000000.0f, 5.0f, true);
+                break;
+            case CVVDP_DISPLAY_LG_OLED_2026_HDR_PQ:
+                cvvdp_set_display(display, 3840, 2160, 2.200148f, 64.9f,
+                                  3000.0f, 6000000.0f, 5.0f, true);
+                break;
             case CVVDP_DISPLAY_STANDARD_FHD:
             default:
-                display->resolution_width = 1920;
-                display->resolution_height = 1080;
-                display->viewing_distance_meters = 0.6f;
-                display->diagonal_size_inches = 24.0f;
-                display->max_luminance = 200.0f;
-                display->contrast = 1000.0f;
-                display->ambient_light = 250.0f;
-                display->reflectivity = 0.005f;
-                display->is_hdr = false;
+                cvvdp_set_display(display, 1920, 1080, 0.6f, 24.0f, 200.0f,
+                                  1000.0f, 250.0f, false);
                 break;
         }
     }
