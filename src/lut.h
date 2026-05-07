@@ -1,5 +1,5 @@
 /*
- * Copyright © 2025, Halide Compression, LLC.
+ * Copyright © 2026, Halide Compression, LLC.
  * All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
