@@ -21,6 +21,13 @@ pub fn build(b: *std.Build) void {
     const flto = b.option(bool, "flto", "enable Link Time Optimization, defaults to false") orelse false;
     const options = b.addOptions();
 
+    // simpleimgio
+    const simpleimgio_dep = b.dependency("simpleimgio", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const simpleimgio = simpleimgio_dep.module("simpleimgio");
+
     // libspng
     const spng_dep = b.dependency("spng", .{
         .target = target,
@@ -81,6 +88,7 @@ pub fn build(b: *std.Build) void {
     });
     cvvdpenc.root_module.addOptions("build_opts", options);
     cvvdpenc.root_module.addImport("c", c_module);
+    cvvdpenc.root_module.addImport("simpleimgio", simpleimgio);
     cvvdpenc.root_module.addIncludePath(b.path("."));
     cvvdpenc.root_module.linkLibrary(cvvdp);
     cvvdpenc.root_module.linkLibrary(spng);

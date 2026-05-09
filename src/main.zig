@@ -13,10 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 const std = @import("std");
-const y4m = @import("y4m.zig");
-const ppm = @import("ppm.zig");
-const pam = @import("pam.zig");
 const c = @import("c");
+const imgio = @import("simpleimgio");
 
 const print = std.debug.print;
 
@@ -31,16 +29,6 @@ pub const Image = struct {
         self.* = undefined;
     }
 };
-
-pub inline fn requantize16to8(x: u16) u8 {
-    const t: u32 = @as(u32, x) * 255 + 32768;
-    return @intCast((t + (t >> 16)) >> 16);
-}
-
-inline fn requantize10to8(x: u16) u8 {
-    const t: u32 = @as(u32, x) * 255 + 512;
-    return @intCast((t + (t >> 10)) >> 10);
-}
 
 pub fn loadPNG(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !Image {
     const file = try std.Io.Dir.cwd().openFile(io, path, .{});
@@ -85,18 +73,59 @@ fn hasExtension(path: []const u8, ext: []const u8) bool {
     return std.ascii.eqlIgnoreCase(tail, ext);
 }
 
-fn yuv420ToRgb8FromFrame(allocator: std.mem.Allocator, frame: y4m.Frame) ![]u8 {
+fn imageToLocal8Bit(allocator: std.mem.Allocator, source: imgio.Image) !Image {
+    var eight = try source.to8Bit(allocator);
+    errdefer eight.deinit(allocator);
+
+    switch (eight.kind) {
+        .bitmap, .grayscale, .rgb, .rgba => {
+            return .{
+                .width = eight.width,
+                .height = eight.height,
+                .channels = eight.depth,
+                .data = eight.data,
+            };
+        },
+        .grayscale_alpha => {
+            const width = eight.width;
+            const height = eight.height;
+            const pixels = try std.math.mul(usize, width, height);
+            if (eight.data.len != pixels * 2) return error.BadImageData;
+
+            const data = try allocator.alloc(u8, pixels);
+            errdefer allocator.free(data);
+
+            for (0..pixels) |i| {
+                data[i] = eight.data[i * 2];
+            }
+
+            eight.deinit(allocator);
+            return .{
+                .width = width,
+                .height = height,
+                .channels = 1,
+                .data = data,
+            };
+        },
+        .pam => return error.UnsupportedPamDepth,
+    }
+}
+
+fn yuv420ToRgb8FromFrame(allocator: std.mem.Allocator, frame: imgio.YuvFrame) ![]u8 {
     if (frame.chroma != .yuv420) return error.UnsupportedY4MChroma;
 
-    const width = frame.width;
-    const height = frame.height;
+    var eight = try frame.to8Bit(allocator);
+    defer eight.deinit(allocator);
+
+    const width = eight.width;
+    const height = eight.height;
 
     // Convert to RGB8 using a simple full-range BT.601-like YUV->RGB.
     // This is intended for metric input, not broadcast-accurate color management.
     const rgb = try allocator.alloc(u8, width * height * 3);
     errdefer allocator.free(rgb);
 
-    const cw = width / 2;
+    const cw = (width + 1) / 2;
 
     const clampU8 = struct {
         fn f(x: i32) u8 {
@@ -106,58 +135,24 @@ fn yuv420ToRgb8FromFrame(allocator: std.mem.Allocator, frame: y4m.Frame) ![]u8 {
         }
     }.f;
 
-    if (frame.bit_depth == .b8) {
-        const y_plane: []const u8 = frame.y;
-        const u_plane: []const u8 = frame.u;
-        const v_plane: []const u8 = frame.v;
+    for (0..height) |yy| {
+        for (0..width) |xx| {
+            const yv: i32 = eight.y[yy * width + xx];
+            const uv: i32 = eight.u[(yy / 2) * cw + (xx / 2)];
+            const vv: i32 = eight.v[(yy / 2) * cw + (xx / 2)];
 
-        for (0..height) |yy| {
-            for (0..width) |xx| {
-                const yv: i32 = y_plane[yy * width + xx];
-                const uv: i32 = u_plane[(yy / 2) * cw + (xx / 2)];
-                const vv: i32 = v_plane[(yy / 2) * cw + (xx / 2)];
+            const u_off = uv - 128;
+            const v_off = vv - 128;
 
-                const u_off = uv - 128;
-                const v_off = vv - 128;
+            const r = yv + ((359 * v_off) >> 8);
+            const g = yv - ((88 * u_off + 183 * v_off) >> 8);
+            const b = yv + ((454 * u_off) >> 8);
 
-                const r = yv + ((359 * v_off) >> 8);
-                const g = yv - ((88 * u_off + 183 * v_off) >> 8);
-                const b = yv + ((454 * u_off) >> 8);
-
-                const i = (yy * width + xx) * 3;
-                rgb[i + 0] = clampU8(r);
-                rgb[i + 1] = clampU8(g);
-                rgb[i + 2] = clampU8(b);
-            }
+            const i = (yy * width + xx) * 3;
+            rgb[i + 0] = clampU8(r);
+            rgb[i + 1] = clampU8(g);
+            rgb[i + 2] = clampU8(b);
         }
-    } else if (frame.bit_depth == .b10) {
-        // Y4M 10-bit is commonly stored as 16-bit little-endian words with values in [0, 1023].
-        const y16 = try frame.yAsU16LE();
-        const u_plane16 = try frame.uAsU16LE();
-        const v_plane16 = try frame.vAsU16LE();
-
-        for (0..height) |yy| {
-            for (0..width) |xx| {
-                // Requantize from 10-bit to 8-bit.
-                const yv: i32 = @intCast(requantize10to8(y16[yy * width + xx]));
-                const uv: i32 = @intCast(requantize10to8(u_plane16[(yy / 2) * cw + (xx / 2)]));
-                const vv: i32 = @intCast(requantize10to8(v_plane16[(yy / 2) * cw + (xx / 2)]));
-
-                const u_off = uv - 128;
-                const v_off = vv - 128;
-
-                const r = yv + ((359 * v_off) >> 8);
-                const g = yv - ((88 * u_off + 183 * v_off) >> 8);
-                const b = yv + ((454 * u_off) >> 8);
-
-                const i = (yy * width + xx) * 3;
-                rgb[i + 0] = clampU8(r);
-                rgb[i + 1] = clampU8(g);
-                rgb[i + 2] = clampU8(b);
-            }
-        }
-    } else {
-        return error.UnsupportedY4MBitDepth;
     }
 
     return rgb;
@@ -167,7 +162,7 @@ pub fn loadY4MFirstFrameAsRGB(allocator: std.mem.Allocator, io: std.Io, path: []
     const file = try std.Io.Dir.cwd().openFile(io, path, .{});
     defer file.close(io);
 
-    var dec = try y4m.Decoder.init(allocator, io, file);
+    var dec = try imgio.Y4mDecoder.init(allocator, io, file);
     defer dec.deinit();
 
     const frame_opt = try dec.readFrame();
@@ -313,18 +308,26 @@ fn printUsage() void {
         \\  -h, --help
         \\      show this help message
     , .{});
-    print("\n\n\x1b[37msRGB PNG, PPM, PGM, PAM, or Y4M input expected\x1b[0m\n", .{});
+    print("\n\n\x1b[37msRGB PNG, PNM/PAM, QOI, or Y4M input expected\x1b[0m\n", .{});
 }
 
 fn loadImage(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !Image {
     if (hasExtension(path, ".png"))
-        return loadPNG(allocator, io, path)
-    else if (ppm.isPPM(path))
-        return try ppm.loadPPM(allocator, io, path)
-    else if (pam.isPAM(path))
-        return try pam.loadPAM(allocator, io, path)
+        return loadPNG(allocator, io, path);
+
+    var decoded = if (hasExtension(path, ".qoi"))
+        try imgio.decodeQoiFile(io, allocator, path)
+    else if (hasExtension(path, ".pbm") or
+        hasExtension(path, ".pgm") or
+        hasExtension(path, ".ppm") or
+        hasExtension(path, ".pnm") or
+        hasExtension(path, ".pam"))
+        try imgio.decodePnmFile(io, allocator, path)
     else
         return error.UnsupportedFileFormat;
+    defer decoded.deinit(allocator);
+
+    return imageToLocal8Bit(allocator, decoded);
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -500,7 +503,7 @@ pub fn main(init: std.process.Init) !void {
 
     const ref_file = try std.Io.Dir.cwd().openFile(io, ref_filename.?, .{});
     defer ref_file.close(io);
-    var ref_dec = try y4m.Decoder.init(allocator, io, ref_file);
+    var ref_dec = try imgio.Y4mDecoder.init(allocator, io, ref_file);
     defer ref_dec.deinit();
 
     if (verbose and !json_output)
@@ -508,7 +511,7 @@ pub fn main(init: std.process.Init) !void {
 
     const dis_file = try std.Io.Dir.cwd().openFile(io, dis_filename.?, .{});
     defer dis_file.close(io);
-    var dis_dec = try y4m.Decoder.init(allocator, io, dis_file);
+    var dis_dec = try imgio.Y4mDecoder.init(allocator, io, dis_file);
     defer dis_dec.deinit();
 
     if (ref_dec.header.width != dis_dec.header.width or ref_dec.header.height != dis_dec.header.height) {

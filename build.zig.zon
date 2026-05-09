@@ -6,6 +6,10 @@
             .url = "git+https://github.com/allyourcodebase/libspng.git#8858232bde47083739c3e25f676093423610ec5e",
             .hash = "spng-0.0.1-T166cP8UAABcBGTOPKx7kUUyHEcu0eDvN8LnSIj3S_cW",
         },
+        .simpleimgio = .{
+            .url = "git+https://github.com/gianni-rosato/simpleimgio.git#3a4e451b1b27139c69a06fe9ccaeabf89adb33e9",
+            .hash = "simpleimgio-0.0.0-oHTuOZe-AAC1Hc8tH4l0WETz8rooAP3mKMivmEdq5THN",
+        },
     },
     .fingerprint = 0xfe41744458a5e60e,
     .minimum_zig_version = "0.16.0",
