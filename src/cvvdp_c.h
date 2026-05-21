@@ -20,6 +20,51 @@
 #include "internal.h"
 #include "util.h"
 
+static inline const float* cvvdp_temporal_ring_frame_c(
+    const TemporalRingBuf* const ring,
+    int age)
+{
+    if (!ring->num_frames) return NULL;
+
+    if (age >= ring->num_frames) age = ring->num_frames - 1;
+
+    const size_t frame_size = (size_t)ring->width * ring->height * 3;
+    const int idx = (ring->current_index + age) % ring->max_frames;
+    return ring->data + idx * frame_size;
+}
+
+static inline void cvvdp_compute_temporal_channels_impl(
+    const CvvdpTemporalChannelsTaskData* const data,
+    const int start,
+    const int end)
+{
+    for (int i = start; i < end; i++) {
+        float Y_sus = 0.0f;
+        float RG_sus = 0.0f;
+        float YV_sus = 0.0f;
+        float Y_trans = 0.0f;
+
+        for (int k = 0; k < data->ring->filter.size; k++) {
+            const float* const frame =
+                cvvdp_temporal_ring_frame_c(data->ring, k);
+            if (!frame) continue;
+
+            const float y = frame[i];
+            Y_sus += y * data->ring->filter.kernel[0][k];
+            Y_trans += y * data->ring->filter.kernel[3][k];
+            RG_sus += frame[i + data->plane_size] *
+                data->ring->filter.kernel[1][k];
+            YV_sus += frame[i + 2 * data->plane_size] *
+                data->ring->filter.kernel[2][k];
+        }
+
+        data->Y_sus[i] = Y_sus;
+        data->RG_sus[i] = RG_sus;
+        data->YV_sus[i] = YV_sus;
+        data->Y_trans[i] = Y_trans;
+    }
+}
+
 static inline void cvvdp_gauss_pyr_reduce_impl(
     const CvvdpReduceTaskData* const data,
     const int start,

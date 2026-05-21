@@ -43,6 +43,84 @@ static inline float cvvdp_neon_kernel_sum(const float* const kernel,
     return sum;
 }
 
+static inline const float* cvvdp_temporal_ring_frame_neon(
+    const TemporalRingBuf* const ring,
+    int age)
+{
+    if (!ring->num_frames) return NULL;
+
+    if (age >= ring->num_frames) age = ring->num_frames - 1;
+
+    const size_t frame_size = (size_t)ring->width * ring->height * 3;
+    const int idx = (ring->current_index + age) % ring->max_frames;
+    return ring->data + idx * frame_size;
+}
+
+static inline void cvvdp_compute_temporal_channels_impl(
+    const CvvdpTemporalChannelsTaskData* const data,
+    const int start,
+    const int end)
+{
+    const size_t plane_size = data->plane_size;
+    int i = start;
+
+    for (; i + 4 <= end; i += 4) {
+        float32x4_t Y_sus = vdupq_n_f32(0.0f);
+        float32x4_t RG_sus = vdupq_n_f32(0.0f);
+        float32x4_t YV_sus = vdupq_n_f32(0.0f);
+        float32x4_t Y_trans = vdupq_n_f32(0.0f);
+
+        for (int k = 0; k < data->ring->filter.size; k++) {
+            const float* const frame =
+                cvvdp_temporal_ring_frame_neon(data->ring, k);
+            if (!frame) continue;
+
+            const float32x4_t y = vld1q_f32(frame + i);
+            const float32x4_t rg = vld1q_f32(frame + plane_size + i);
+            const float32x4_t yv = vld1q_f32(frame + 2 * plane_size + i);
+
+            Y_sus = cvvdp_neon_madd_n(Y_sus, y,
+                                      data->ring->filter.kernel[0][k]);
+            Y_trans = cvvdp_neon_madd_n(Y_trans, y,
+                                        data->ring->filter.kernel[3][k]);
+            RG_sus = cvvdp_neon_madd_n(RG_sus, rg,
+                                       data->ring->filter.kernel[1][k]);
+            YV_sus = cvvdp_neon_madd_n(YV_sus, yv,
+                                       data->ring->filter.kernel[2][k]);
+        }
+
+        vst1q_f32(data->Y_sus + i, Y_sus);
+        vst1q_f32(data->RG_sus + i, RG_sus);
+        vst1q_f32(data->YV_sus + i, YV_sus);
+        vst1q_f32(data->Y_trans + i, Y_trans);
+    }
+
+    for (; i < end; i++) {
+        float Y_sus = 0.0f;
+        float RG_sus = 0.0f;
+        float YV_sus = 0.0f;
+        float Y_trans = 0.0f;
+
+        for (int k = 0; k < data->ring->filter.size; k++) {
+            const float* const frame =
+                cvvdp_temporal_ring_frame_neon(data->ring, k);
+            if (!frame) continue;
+
+            const float y = frame[i];
+            Y_sus += y * data->ring->filter.kernel[0][k];
+            Y_trans += y * data->ring->filter.kernel[3][k];
+            RG_sus += frame[i + plane_size] * data->ring->filter.kernel[1][k];
+            YV_sus += frame[i + 2 * plane_size] *
+                data->ring->filter.kernel[2][k];
+        }
+
+        data->Y_sus[i] = Y_sus;
+        data->RG_sus[i] = RG_sus;
+        data->YV_sus[i] = YV_sus;
+        data->Y_trans[i] = Y_trans;
+    }
+}
+
 static inline void cvvdp_blur_horizontal_impl(
     const CvvdpBlurTaskData* const data,
     const int start,

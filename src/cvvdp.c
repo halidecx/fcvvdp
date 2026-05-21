@@ -626,32 +626,8 @@ static void cvvdp_compute_temporal_channels_task(void* user_data,
                                                  const int start,
                                                  const int end)
 {
-    CvvdpTemporalChannelsTaskData* const data =
-        (CvvdpTemporalChannelsTaskData*)user_data;
-    for (int i = start; i < end; i++) {
-        float Y_sus = 0.0f;
-        float RG_sus = 0.0f;
-        float YV_sus = 0.0f;
-        float Y_trans = 0.0f;
-
-        for (int k = 0; k < data->ring->filter.size; k++) {
-            const float* const frame =
-                cvvdp_temporal_ring_get_frame(data->ring, k);
-            if (!frame) continue;
-
-            const float y = frame[i];
-            Y_sus += y * data->ring->filter.kernel[0][k];
-            Y_trans += y * data->ring->filter.kernel[3][k];
-            RG_sus += frame[i + data->plane_size] * data->ring->filter.kernel[1][k];
-            YV_sus += frame[i + 2 * data->plane_size] *
-                data->ring->filter.kernel[2][k];
-        }
-
-        data->Y_sus[i] = Y_sus;
-        data->RG_sus[i] = RG_sus;
-        data->YV_sus[i] = YV_sus;
-        data->Y_trans[i] = Y_trans;
-    }
+    cvvdp_compute_temporal_channels_impl(
+        (CvvdpTemporalChannelsTaskData*)user_data, start, end);
 }
 
 static void cvvdp_gauss_pyr_reduce_task(void* user_data,
