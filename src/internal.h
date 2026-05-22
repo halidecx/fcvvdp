@@ -32,7 +32,6 @@
 #define CVVDP_LUT_SIZE 32 // CSF LUT size
 #define CVVDP_GAUSSIAN_SIZE 8 // gaussian kernel size
 #define CVVDP_NUM_CHANNELS 4 // number of color channels
-#define CVVDP_GAUSSIAN_SIZE 8 // Gaussian blur radius
 #define CVVDP_MAX_THREADS 32 // max thread cnt
 
 static const float GAUSS_PYR_KERNEL[5] = {
