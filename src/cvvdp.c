@@ -912,32 +912,6 @@ static void cvvdp_compute_temporal_channels(CvvdpThreadPool* const pool,
         return;
     }
 
-    memset(Y_sus, 0, plane_size * sizeof(float));
-    memset(RG_sus, 0, plane_size * sizeof(float));
-    memset(YV_sus, 0, plane_size * sizeof(float));
-    memset(Y_trans, 0, plane_size * sizeof(float));
-
-    if (!cvvdp_thread_pool_is_active(pool)) {
-        for (int k = 0; k < ring->filter.size; k++) {
-            const float* const frame = cvvdp_temporal_ring_get_frame(ring, k);
-            if (!frame) continue;
-
-            const float k0 = ring->filter.kernel[0][k];
-            const float k1 = ring->filter.kernel[1][k];
-            const float k2 = ring->filter.kernel[2][k];
-            const float k3 = ring->filter.kernel[3][k];
-
-            for (size_t i = 0; i < plane_size; i++) {
-                const float y = frame[i];
-                Y_sus[i] += y * k0;
-                Y_trans[i] += y * k3;
-                RG_sus[i] += frame[i + plane_size] * k1;
-                YV_sus[i] += frame[i + 2 * plane_size] * k2;
-            }
-        }
-        return;
-    }
-
     CvvdpTemporalChannelsTaskData task = {
         .ring = ring,
         .Y_sus = Y_sus,
@@ -946,6 +920,12 @@ static void cvvdp_compute_temporal_channels(CvvdpThreadPool* const pool,
         .Y_trans = Y_trans,
         .plane_size = plane_size,
     };
+
+    if (!cvvdp_thread_pool_is_active(pool)) {
+        cvvdp_compute_temporal_channels_impl(&task, 0, (int)plane_size);
+        return;
+    }
+
     cvvdp_parallel_for(pool, (int)plane_size, 2048,
                        cvvdp_compute_temporal_channels_task, &task);
 }
@@ -956,41 +936,19 @@ static void cvvdp_gauss_pyr_reduce(CvvdpThreadPool* const pool,
                                    const int src_w,
                                    const int src_h)
 {
-    if (!cvvdp_thread_pool_is_active(pool)) {
-        const int dst_w = (src_w + 1) >> 1;
-        const int dst_h = (src_h + 1) >> 1;
-
-        for (int dy = 0; dy < dst_h; dy++) {
-            float* const dst_row = &dst[dy * dst_w];
-            const int dy2 = dy << 1;
-            for (int dx = 0; dx < dst_w; dx++) {
-                float val = 0.0f;
-                const int dx2 = dx << 1;
-                for (int ky = -2; ky <= 2; ky++) {
-                    int sy = dy2 + ky;
-                    if (sy < 0) sy = -sy - 1;
-                    if (sy >= src_h) sy = 2 * src_h - sy - 2;
-                    const float* const src_row = &src[sy * src_w];
-                    for (int kx = -2; kx <= 2; kx++) {
-                        int sx = dx2 + kx;
-                        if (sx < 0) sx = -sx - 1;
-                        if (sx >= src_w) sx = 2 * src_w - sx - 2;
-                        val += GAUSS_PYR_KERNEL[kx + 2] *
-                            GAUSS_PYR_KERNEL[ky + 2] * src_row[sx];
-                    }
-                }
-                dst_row[dx] = val;
-            }
-        }
-        return;
-    }
-
     CvvdpReduceTaskData task = {
         .src = src,
         .dst = dst,
         .src_w = src_w,
         .src_h = src_h,
     };
+
+    if (!cvvdp_thread_pool_is_active(pool)) {
+        const int dst_h = (src_h + 1) >> 1;
+        cvvdp_gauss_pyr_reduce_impl(&task, 0, dst_h);
+        return;
+    }
+
     cvvdp_parallel_for(pool, (src_h + 1) >> 1, 4,
                        cvvdp_gauss_pyr_reduce_task, &task);
 }
@@ -1001,41 +959,18 @@ static void cvvdp_gauss_pyr_expand(CvvdpThreadPool* const pool,
                                    const int dst_w,
                                    const int dst_h)
 {
-    if (!cvvdp_thread_pool_is_active(pool)) {
-        const int src_w = (dst_w + 1) >> 1;
-        const int src_h = (dst_h + 1) >> 1;
-
-        for (int dy = 0; dy < dst_h; dy++) {
-            float* const dst_row = &dst[dy * dst_w];
-            const int parity_y = dy % 2;
-            for (int dx = 0; dx < dst_w; dx++) {
-                float val = 0.0f;
-                const int parity_x = dx % 2;
-                for (int ky = -2 + parity_y; ky <= 2; ky += 2) {
-                    int sy = (dy + ky) >> 1;
-                    if (sy < 0) sy = -sy - 1;
-                    if (sy >= src_h) sy = 2 * src_h - sy - 2;
-                    const float* const src_row = &src[sy * src_w];
-                    for (int kx = -2 + parity_x; kx <= 2; kx += 2) {
-                        int sx = (dx + kx) >> 1;
-                        if (sx < 0) sx = -sx - 1;
-                        if (sx >= src_w) sx = 2 * src_w - sx - 2;
-                        val += 4.0f * GAUSS_PYR_KERNEL[kx + 2] *
-                            GAUSS_PYR_KERNEL[ky + 2] * src_row[sx];
-                    }
-                }
-                dst_row[dx] = val;
-            }
-        }
-        return;
-    }
-
     CvvdpExpandTaskData task = {
         .src = src,
         .dst = dst,
         .dst_w = dst_w,
         .dst_h = dst_h,
     };
+
+    if (!cvvdp_thread_pool_is_active(pool)) {
+        cvvdp_gauss_pyr_expand_impl(&task, 0, dst_h);
+        return;
+    }
+
     cvvdp_parallel_for(pool, dst_h, 4, cvvdp_gauss_pyr_expand_task, &task);
 }
 
