@@ -49,17 +49,13 @@ multiple threads, fcvvdp is over 221% faster than the reference implementation.
 
 Compilation requires:
 
-- _Optional_ [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs)
-- _Optional_ [libunwind](https://github.com/libunwind/libunwind)
 - [Zig](https://ziglang.org/) 0.16.x
 - macOS, Linux, or Unix-like operating system
 
 ### Binary
 
 0. Ensure all dependencies are installed
-1. Run `zig build --release=fast`
-   - add `-Dflto=true` for FLTO
-   - add `-Dlibz-rs=true` for zlib-rs
+1. Run `zig build --release=fast` (add `-Dflto=true` for FLTO)
 2. Your `fcvvdp` binary will be in `zig-out/bin/`
 
 ```sh
