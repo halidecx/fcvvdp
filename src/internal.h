@@ -262,7 +262,7 @@ typedef struct CvvdpBasebandDiffTaskData {
 
 typedef struct CvvdpNormTaskData {
     const float* data;
-    double* partials;
+    double *partials, *l1_partials;
     int count;
     int participant_count;
     int power;

@@ -28,6 +28,9 @@
 #define CVVDP_BETA_TCH 4
 #define CVVDP_BETA_SCH 4
 
+/* Dual-norm pooling: weight for L1 (mean) component alongside L4 */
+#define CVVDP_L1_POOL_WEIGHT 10.0f
+
 /* CSF parameters */
 #define CVVDP_CSF_SIGMA (-1.5f)
 #define CVVDP_SENSITIVITY_CORRECTION (-0.2797423303127289f)
@@ -37,8 +40,13 @@
 #define CVVDP_JOD_EXP 0.9302042722702026f
 
 /* Channel weights */
-#define CVVDP_CH_CHROM_W 1.0f
+#define CVVDP_CH_CHROM_W 0.75f
 #define CVVDP_CH_TRANS_W 0.8081134557723999f
+
+/* Edge asymmetry: weight for artifacts (extra content in distorted) vs
+   detail loss (missing content in distorted). 1.0 = symmetric. */
+#define CVVDP_ARTIFACT_WEIGHT 0.2f
+#define CVVDP_DETAIL_LOST_WEIGHT 1.2f
 
 /* Distortion parameters */
 #define CVVDP_D_MAX 2.5642454624176025f
@@ -97,6 +105,13 @@ static const float CVVDP_BASEBAND_WEIGHT[4] = {
     1.6627724170684814f,
     4.11874532699585f,
     25.25969886779785f
+};
+
+/* Per-level weights for pooling (index 0 = highest frequency) */
+static const float CVVDP_LEVEL_WEIGHT[14] = {
+    2.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f,
+    1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+    1.0f, 1.0f
 };
 
 /* unused, included for informational purposes */

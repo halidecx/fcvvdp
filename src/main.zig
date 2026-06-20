@@ -246,13 +246,15 @@ fn parseDisplayModel(name: []const u8) c.FcvvdpDisplayModel {
         .{ "65inch_hdr_pq_1Knit", c.CVVDP_DISPLAY_65INCH_HDR_PQ_1KNIT },
         .{ "65inch_hdr_pq_1knit", c.CVVDP_DISPLAY_65INCH_HDR_PQ_1KNIT },
         .{ "lg_oled_2026_hdr_pq", c.CVVDP_DISPLAY_LG_OLED_2026_HDR_PQ },
+        .{ "mcos", c.CVVDP_DISPLAY_CID22_MCOS },
+        .{ "cid22_mcos", c.CVVDP_DISPLAY_CID22_MCOS },
     };
 
     inline for (models) |model| {
         if (std.mem.eql(u8, name, model[0])) return model[1];
     }
 
-    return c.CVVDP_DISPLAY_STANDARD_FHD; // default
+    return c.CVVDP_DISPLAY_CID22_MCOS; // default
 }
 
 fn displayModelName(model: c.FcvvdpDisplayModel) []const u8 {
@@ -283,6 +285,7 @@ fn displayModelName(model: c.FcvvdpDisplayModel) []const u8 {
         c.CVVDP_DISPLAY_65INCH_HDR_PQ_2KNIT => "65-inch HDR PQ 2Knit",
         c.CVVDP_DISPLAY_65INCH_HDR_PQ_1KNIT => "65-inch HDR PQ 1Knit",
         c.CVVDP_DISPLAY_LG_OLED_2026_HDR_PQ => "65-inch LG OLED G6 2026 HDR",
+        c.CVVDP_DISPLAY_CID22_MCOS => "CID22 MCOS-tuned HDR (30\" 4K, 10000 cd/m², 0.45m viewing)",
         else => "Unknown",
     };
 }
@@ -296,9 +299,8 @@ fn printUsage() void {
         \\
         \\options:
         \\  -m, --model <name>
-        \\      display model to use; accepts short names (fhd, 4k, hdr_pq,
-        \\      hdr_hlg, hdr_linear, hdr_dark, hdr_zoom) or preset JSON keys;
-        \\      default: fhd
+        \\      display model to use: fhd, 4k, hdr_pq, hdr_hlg, hdr_linear,
+        \\      hdr_dark, hdr_zoom, mcos or preset JSON keys; default: mcos
         \\  -t, --threads u8
         \\      task thread count (0=auto..INT_MAX); default 0
         \\  -v, --verbose
@@ -340,7 +342,7 @@ pub fn main(init: std.process.Init) !void {
 
     var ref_filename: ?[]const u8 = null;
     var dis_filename: ?[]const u8 = null;
-    var display_model: c_uint = @intCast(c.CVVDP_DISPLAY_STANDARD_FHD);
+    var display_model: c_uint = @intCast(c.CVVDP_DISPLAY_CID22_MCOS);
     var threads: c_uint = 0;
     var verbose = false;
     var json_output = false;

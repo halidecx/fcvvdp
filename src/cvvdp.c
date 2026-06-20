@@ -33,6 +33,11 @@
 #include <math.h>
 #include <unistd.h>
 
+static inline float srgb_to_linear(const float v) {
+    if (v <= 0.04045f) return v / 12.92f;
+    return powf((v + 0.055f) / 1.055f, 2.4f);
+}
+
 static bool cvvdp_thread_pool_is_active(const CvvdpThreadPool* const pool) {
     return pool != NULL && pool->worker_count > 0;
 }
@@ -255,6 +260,7 @@ static void cvvdp_set_display(Display* const display,
     display->contrast = contrast;
     display->ambient_light = ambient_light;
     display->reflectivity = 0.005f;
+    display->exposure = 1.0f;
     display->is_hdr = is_hdr;
 }
 
@@ -371,6 +377,10 @@ static void cvvdp_init_display(Display* const display,
             case CVVDP_DISPLAY_LG_OLED_2026_HDR_PQ:
                 cvvdp_set_display(display, 3840, 2160, 2.200148f, 64.9f,
                                   3000.0f, 6000000.0f, 5.0f, true);
+                break;
+            case CVVDP_DISPLAY_CID22_MCOS:
+                cvvdp_set_display(display, 3840, 2160, 0.45f, 30.0f, 10000.0f,
+                                  1000000.0f, 0.1f, true);
                 break;
             case CVVDP_DISPLAY_STANDARD_FHD:
             default:
@@ -668,6 +678,8 @@ static void cvvdp_masked_diff_task(void* user_data,
                                    const int end)
 {
     CvvdpMaskedDiffTaskData* const data = (CvvdpMaskedDiffTaskData*)user_data;
+    const float wghts[4] =
+        {1.0f, CVVDP_CH_CHROM_W, CVVDP_CH_CHROM_W, CVVDP_CH_TRANS_W};
     for (int i = start; i < end; i++) {
         float cm[4];
         for (int ch = 0; ch < 4; ch++)
@@ -680,22 +692,12 @@ static void cvvdp_masked_diff_task(void* user_data,
                 cm[2] * powf(2.0f, CVVDP_XCM_WEIGHTS[8 + ch]) +
                 cm[3] * powf(2.0f, CVVDP_XCM_WEIGHTS[12 + ch]);
 
-            const float diff = fabsf(data->ref_level[ch][i] - data->dst_level[ch][i]);
+            const float diff_signed = data->ref_level[ch][i] - data->dst_level[ch][i];
+            const float diff = 0.7f * fabsf(diff_signed) + 0.5f * diff_signed;
             const float du = powf(diff, CVVDP_MASK_P) / (1.0f + mask);
             const float d_val = data->max_v * du / (data->max_v + du);
 
-            float weight = 1.0f;
-            switch (ch) {
-                case 1:
-                case 2:
-                    weight = CVVDP_CH_CHROM_W;
-                    break;
-                case 3:
-                    weight = CVVDP_CH_TRANS_W;
-                    break;
-            }
-
-            data->d[ch * data->lev_size + i] = d_val * weight;
+            data->d[ch * data->lev_size + i] = d_val * wghts[ch];
         }
     }
 }
@@ -716,17 +718,22 @@ static void cvvdp_norm_task(void* user_data,
     for (int idx = start; idx < end; idx++) {
         const int range_start = (idx * data->count) / data->participant_count;
         const int range_end = ((idx + 1) * data->count) / data->participant_count;
-        double sum = 0.0;
+        double sum = 0.0, l1_sum = 0.0;
         if (data->power == 2) {
             for (int i = range_start; i < range_end; i++) {
                 const double v = data->data[i];
                 sum += v * v;
+                l1_sum += fabs(v);
             }
         } else {
-            for (int i = range_start; i < range_end; i++)
-                sum += pow(fabs((double)data->data[i]), data->power);
+            for (int i = range_start; i < range_end; i++) {
+                const double av = fabs((double)data->data[i]);
+                sum += pow(av, data->power);
+                l1_sum += av;
+            }
         }
         data->partials[idx] = sum;
+        data->l1_partials[idx] = l1_sum;
     }
 }
 
@@ -868,18 +875,18 @@ FcvvdpError cvvdp_load_image(const FcvvdpImage* const img,
                     r = row[x * 3 + 0] / 255.0f;
                     g = row[x * 3 + 1] / 255.0f;
                     b = row[x * 3 + 2] / 255.0f;
-                    r = (r < 0) ? -powf(-r, 2.4f) : powf(r, 2.4f);
-                    g = (g < 0) ? -powf(-g, 2.4f) : powf(g, 2.4f);
-                    b = (b < 0) ? -powf(-b, 2.4f) : powf(b, 2.4f);
+                    r = srgb_to_linear(r);
+                    g = srgb_to_linear(g);
+                    b = srgb_to_linear(b);
                     break;
                 }
                 case CVVDP_PIXEL_FORMAT_RGB_UINT16: {
                     const uint16_t* const row =
                         (const uint16_t*)((const uint8_t*)img->data
                                           + stride_mul);
-                    r = row[x * 3 + 0] / 65535.0f;
-                    g = row[x * 3 + 1] / 65535.0f;
-                    b = row[x * 3 + 2] / 65535.0f;
+                    r = srgb_to_linear(row[x * 3 + 0] / 65535.0f);
+                    g = srgb_to_linear(row[x * 3 + 1] / 65535.0f);
+                    b = srgb_to_linear(row[x * 3 + 2] / 65535.0f);
                     break;
                 }
                 default: return CVVDP_ERROR_INVALID_FORMAT;
@@ -1073,37 +1080,39 @@ static float cvvdp_to_jod(const float quality) {
 static float cvvdp_compute_norm(CvvdpThreadPool* const pool,
                                 const float* const data,
                                 const int count,
-                                const int power)
+                                float* const out_l1_mean)
 {
     const int participant_count = pool ? pool->worker_count + 1 : 1;
     if (!pool || participant_count == 1 || count < 8192) {
-        double sum = 0.0;
-        if (power == 2) {
-            for (int i = 0; i < count; i++) {
-                const double v = data[i];
-                sum += v * v;
-            }
-        } else {
-            for (int i = 0; i < count; i++)
-                sum += pow(fabs((double)data[i]), power);
+        double sum_sq = 0.0, sum_abs = 0.0;
+        for (int i = 0; i < count; i++) {
+            const double v = data[i];
+            sum_sq += v * v;
+            sum_abs += fabs(v);
         }
-        return (float)pow(sum / count, 1.0 / power);
+        *out_l1_mean = (float)(sum_abs / count);
+        return (float)pow(sum_sq / count, 0.5);
     }
 
     double partials[CVVDP_MAX_THREADS] = {0};
+    double l1_partials[CVVDP_MAX_THREADS] = {0};
     CvvdpNormTaskData task = {
         .data = data,
         .partials = partials,
+        .l1_partials = l1_partials,
         .count = count,
         .participant_count = participant_count,
-        .power = power,
+        .power = 2,
     };
     cvvdp_parallel_for(pool, participant_count, 1, cvvdp_norm_task, &task);
 
-    double sum = 0.0;
-    for (int i = 0; i < participant_count; i++)
-        sum += partials[i];
-    return (float)pow(sum / count, 1.0 / power);
+    double sum_sq = 0.0, sum_abs = 0.0;
+    for (int i = 0; i < participant_count; i++) {
+        sum_sq += partials[i];
+        sum_abs += l1_partials[i];
+    }
+    *out_l1_mean = (float)(sum_abs / count);
+    return (float)pow(sum_sq / count, 0.5);
 }
 
 static FcvvdpError cvvdp_process_pyramid_threaded(FcvvdpCtx* const c,
@@ -1226,8 +1235,9 @@ static FcvvdpError cvvdp_process_pyramid_threaded(FcvvdpCtx* const c,
 
     const float blur_sigma = 3.0f;
     const int blur_radius = CVVDP_GAUSSIAN_SIZE;
-    const float ch_gain[4] = {1.0f, 1.45f, 1.0f, 1.0f};
+    const float ch_gain[4] = {0.75f, 0.5f, 0.6f, 1.0f};
     double total_score = 0.0;
+    double total_l1_score = 0.0;
     float blur_kernel_sum = 0.0f;
     float blur_kernel[17];
     for (int i = 0; i < 17; i++) {
@@ -1311,9 +1321,11 @@ static FcvvdpError cvvdp_process_pyramid_threaded(FcvvdpCtx* const c,
                                cvvdp_masked_diff_task, &mask_task);
 
             for (int ch = 0; ch < 4; ch++) {
+                float l1_mean;
                 const float norm = cvvdp_compute_norm(pool, d + ch * lev_size,
-                                                      (int)lev_size, 2);
-                total_score += powf(norm, 4.0f);
+                                                      (int)lev_size, &l1_mean);
+                total_score += CVVDP_LEVEL_WEIGHT[lev] * powf(norm, 4.0f);
+                total_l1_score += CVVDP_LEVEL_WEIGHT[lev] * l1_mean;
             }
         } else {
             float* const d = c->pyr_d;
@@ -1338,15 +1350,18 @@ static FcvvdpError cvvdp_process_pyramid_threaded(FcvvdpCtx* const c,
             cvvdp_parallel_for(pool, (int)(lev_size * 4), 2048,
                                cvvdp_baseband_diff_task, &base_task);
             for (int ch = 0; ch < 4; ch++) {
+                float l1_mean;
                 const float norm =
                     cvvdp_compute_norm(pool, d + ch * lev_size,
-                                       (int)lev_size, 2);
-                total_score += powf(norm, 4.0f);
+                                       (int)lev_size, &l1_mean);
+                total_score += CVVDP_LEVEL_WEIGHT[lev] * powf(norm, 4.0f);
+                total_l1_score += CVVDP_LEVEL_WEIGHT[lev] * l1_mean;
             }
         }
     }
 
-    *out_score = pow(total_score, 0.25);
+    *out_score = pow(total_score, 0.25) +
+        CVVDP_L1_POOL_WEIGHT * (total_l1_score / (num_levels * 4));
 
     return err;
 }
@@ -1467,8 +1482,9 @@ static FcvvdpError cvvdp_process_pyramid_serial(FcvvdpCtx* const c,
 
     const float blur_sigma = 3.0f;
     const int blur_radius = CVVDP_GAUSSIAN_SIZE;
-    const float ch_gain[4] = {1.0f, 1.45f, 1.0f, 1.0f};
+    const float ch_gain[4] = {0.75f, 0.5f, 0.6f, 1.0f};
     double total_score = 0.0;
+    double total_l1_score = 0.0;
     float blur_kernel_sum = 0.0f;
     float blur_kernel[17];
     for (int i = 0; i < 17; i++) {
@@ -1542,8 +1558,8 @@ static FcvvdpError cvvdp_process_pyramid_serial(FcvvdpCtx* const c,
                         cm[2] * powf(2.0f, CVVDP_XCM_WEIGHTS[8 + ch]) +
                         cm[3] * powf(2.0f, CVVDP_XCM_WEIGHTS[12 + ch]);
 
-                    const float diff =
-                        fabsf(ref_pyr[lev][ch][i] - dst_pyr[lev][ch][i]);
+                    const float diff_signed = ref_pyr[lev][ch][i] - dst_pyr[lev][ch][i];
+                    const float diff = 0.7f * fabsf(diff_signed) + 0.5f * diff_signed;
                     const float du = powf(diff, CVVDP_MASK_P) / (1.0f + mask);
                     const float d_val = max_v * du / (max_v + du);
 
@@ -1563,9 +1579,12 @@ static FcvvdpError cvvdp_process_pyramid_serial(FcvvdpCtx* const c,
             }
 
             for (int ch = 0; ch < 4; ch++) {
+                float l1_mean;
                 const float norm =
-                    cvvdp_compute_norm(NULL, d + ch * lev_size, (int)lev_size, 2);
-                total_score += powf(norm, 4.0f);
+                    cvvdp_compute_norm(NULL, d + ch * lev_size,
+                                       (int)lev_size, &l1_mean);
+                total_score += CVVDP_LEVEL_WEIGHT[lev] * powf(norm, 4.0f);
+                total_l1_score += CVVDP_LEVEL_WEIGHT[lev] * l1_mean;
             }
         } else {
             float* const d = c->pyr_d;
@@ -1591,14 +1610,18 @@ static FcvvdpError cvvdp_process_pyramid_serial(FcvvdpCtx* const c,
             cvvdp_baseband_diff_impl(&base_task, 0, (int)(lev_size * 4));
 
             for (int ch = 0; ch < 4; ch++) {
+                float l1_mean;
                 const float norm =
-                    cvvdp_compute_norm(NULL, d + ch * lev_size, (int)lev_size, 2);
-                total_score += powf(norm, 4.0f);
+                    cvvdp_compute_norm(NULL, d + ch * lev_size,
+                                       (int)lev_size, &l1_mean);
+                total_score += CVVDP_LEVEL_WEIGHT[lev] * powf(norm, 4.0f);
+                total_l1_score += CVVDP_LEVEL_WEIGHT[lev] * l1_mean;
             }
         }
     }
 
-    *out_score = pow(total_score, 0.25);
+    *out_score = pow(total_score, 0.25) +
+        CVVDP_L1_POOL_WEIGHT * (total_l1_score / (num_levels * 4));
     return CVVDP_OK;
 }
 

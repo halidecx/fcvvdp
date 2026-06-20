@@ -61,21 +61,24 @@ Compilation requires:
 ```sh
 fcvvdp by Halide Compression, LLC | [version]
 
-usage: fcvvdp [options] <reference.(png|y4m)> <distorted.(png|y4m)>
+usage: fcvvdp [options] <reference> <distorted>
 
 compare two images/videos using the CVVDP perceptual quality metric
 
 options:
   -m, --model <name>
-      display model to use; accepts short names (fhd, 4k, hdr_pq,
-      hdr_hlg, hdr_linear, hdr_dark, hdr_zoom) or preset JSON keys;
-      default: fhd
+      display model to use: fhd, 4k, hdr_pq, hdr_hlg, hdr_linear,
+      hdr_dark, hdr_zoom, mcos or preset JSON keys; default: mcos
+  -t, --threads u8
+      task thread count (0=auto..INT_MAX); default 0
   -v, --verbose
       show verbose output with display parameters
   -j, --json
       output result as JSON
   -h, --help
       show this help message
+
+sRGB PNG, PNM/PAM, QOI, or Y4M input expected
 ```
 
 ### Library

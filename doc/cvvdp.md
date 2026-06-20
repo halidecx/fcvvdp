@@ -23,13 +23,14 @@ Available display model presets include:
 
 | Model        | Description                                              |
 | ------------ | -------------------------------------------------------- |
-| `fhd`        | 24" FullHD monitor, 200 cd/m², office lighting (default) |
+| `fhd`        | 24" FullHD monitor, 200 cd/m², office lighting           |
 | `4k`         | 30" 4K monitor, 200 cd/m², office lighting               |
 | `hdr_pq`     | 30" 4K HDR, 1500 cd/m², low light                        |
 | `hdr_hlg`    | 30" 4K HDR HLG, 1500 cd/m², low light                    |
 | `hdr_linear` | 30" 4K HDR linear, 1500 cd/m², low light                 |
 | `hdr_dark`   | 30" 4K HDR, 1500 cd/m², dark room                        |
 | `hdr_zoom`   | 30" 4K HDR, 10000 cd/m², close viewing                   |
+| `mcos`       | 30" 4K HDR, 10000 cd/m², 0.45m viewing (default)         |
 
 The CLI also accepts the full preset keys:
 
