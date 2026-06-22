@@ -33,6 +33,11 @@
 #include <math.h>
 #include <unistd.h>
 
+static inline float srgb_to_linear(const float v) {
+    if (v <= 0.04045f) return v / 12.92f;
+    return powf((v + 0.055f) / 1.055f, 2.4f);
+}
+
 static bool cvvdp_thread_pool_is_active(const CvvdpThreadPool* const pool) {
     return pool != NULL && pool->worker_count > 0;
 }
@@ -865,21 +870,18 @@ FcvvdpError cvvdp_load_image(const FcvvdpImage* const img,
                 case CVVDP_PIXEL_FORMAT_RGB_UINT8: {
                     const uint8_t* const row =
                         (const uint8_t*)img->data + stride_mul;
-                    r = row[x * 3 + 0] / 255.0f;
-                    g = row[x * 3 + 1] / 255.0f;
-                    b = row[x * 3 + 2] / 255.0f;
-                    r = (r < 0) ? -powf(-r, 2.4f) : powf(r, 2.4f);
-                    g = (g < 0) ? -powf(-g, 2.4f) : powf(g, 2.4f);
-                    b = (b < 0) ? -powf(-b, 2.4f) : powf(b, 2.4f);
+                    r = srgb_to_linear(row[x * 3 + 0] / 255.0f);
+                    g = srgb_to_linear(row[x * 3 + 1] / 255.0f);
+                    b = srgb_to_linear(row[x * 3 + 2] / 255.0f);
                     break;
                 }
                 case CVVDP_PIXEL_FORMAT_RGB_UINT16: {
                     const uint16_t* const row =
                         (const uint16_t*)((const uint8_t*)img->data
                                           + stride_mul);
-                    r = row[x * 3 + 0] / 65535.0f;
-                    g = row[x * 3 + 1] / 65535.0f;
-                    b = row[x * 3 + 2] / 65535.0f;
+                    r = srgb_to_linear(row[x * 3 + 0] / 65535.0f);
+                    g = srgb_to_linear(row[x * 3 + 1] / 65535.0f);
+                    b = srgb_to_linear(row[x * 3 + 2] / 65535.0f);
                     break;
                 }
                 default: return CVVDP_ERROR_INVALID_FORMAT;
