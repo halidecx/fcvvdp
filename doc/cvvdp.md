@@ -30,6 +30,7 @@ Available display model presets include:
 | `hdr_linear` | 30" 4K HDR linear, 1500 cd/m², low light                 |
 | `hdr_dark`   | 30" 4K HDR, 1500 cd/m², dark room                        |
 | `hdr_zoom`   | 30" 4K HDR, 10000 cd/m², close viewing                   |
+| `mcos`       | 30" 4K HDR, 10000 cd/m², 0.45m viewing                   |
 
 The CLI also accepts the full preset keys:
 

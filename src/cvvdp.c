@@ -260,6 +260,7 @@ static void cvvdp_set_display(Display* const display,
     display->contrast = contrast;
     display->ambient_light = ambient_light;
     display->reflectivity = 0.005f;
+    display->exposure = 1.0f;
     display->is_hdr = is_hdr;
 }
 
@@ -376,6 +377,10 @@ static void cvvdp_init_display(Display* const display,
             case CVVDP_DISPLAY_LG_OLED_2026_HDR_PQ:
                 cvvdp_set_display(display, 3840, 2160, 2.200148f, 64.9f,
                                   3000.0f, 6000000.0f, 5.0f, true);
+                break;
+            case CVVDP_DISPLAY_CID22_MCOS:
+                cvvdp_set_display(display, 3840, 2160, 0.45f, 30.0f,
+                                  10000.0f, 1000000.0f, 0.1f, true);
                 break;
             case CVVDP_DISPLAY_STANDARD_FHD:
             default:
