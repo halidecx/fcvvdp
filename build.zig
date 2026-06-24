@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) void {
         "-Wall",
         "-Wextra",
         "-Wpedantic",
-        "-O3",
+        "-Ofast",
     };
     cvvdp.root_module.addCSourceFiles(.{
         .files = &cvvdp_sources,
