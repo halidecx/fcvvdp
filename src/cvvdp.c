@@ -27,6 +27,11 @@
 #include <unistd.h>
 
 static const CvvdpSimdDispatch* g_cvvdp_dispatch = NULL;
+static pthread_once_t g_cvvdp_dispatch_once = PTHREAD_ONCE_INIT;
+
+static void cvvdp_init_dispatch_once(void) {
+    g_cvvdp_dispatch = cvvdp_resolve_dispatch();
+}
 
 const CvvdpSimdDispatch* cvvdp_resolve_dispatch(void) {
 #if defined(__x86_64__)
@@ -1656,8 +1661,7 @@ FcvvdpError cvvdp_create(const int width,
     *out_c = NULL;
     if (width <= 0 || height <= 0) return CVVDP_ERROR_INVALID_DIMENSIONS;
 
-    if (!g_cvvdp_dispatch)
-        g_cvvdp_dispatch = cvvdp_resolve_dispatch();
+    pthread_once(&g_cvvdp_dispatch_once, cvvdp_init_dispatch_once);
 
     FcvvdpCtx* const c = (FcvvdpCtx*)calloc(1, sizeof(FcvvdpCtx));
     if (!c) return CVVDP_ERROR_OUT_OF_MEMORY;
