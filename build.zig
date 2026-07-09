@@ -57,19 +57,35 @@ pub fn build(b: *std.Build) void {
     });
     const cvvdp_sources = [_][]const u8{
         "src/cvvdp.c",
+        "src/cvvdp_c.c",
     };
     const cvvdp_flags = [_][]const u8{
         "-std=c23",
         "-Wall",
         "-Wextra",
         "-Wpedantic",
-        "-Ofast",
+        "-O3",
+        "-ffast-math",
     };
+    const target_result = target.result;
     cvvdp.root_module.addCSourceFiles(.{
         .files = &cvvdp_sources,
-        .flags = if (flto) &cvvdp_flags ++ &[_][]const u8{"-flto"} else &cvvdp_flags,
+        .flags = &cvvdp_flags,
     });
+
+    if (target_result.cpu.arch == .x86_64) {
+        cvvdp.root_module.addCSourceFile(.{
+            .file = b.path("src/cvvdp_avx2.c"),
+            .flags = &cvvdp_flags,
+        });
+    } else if (target_result.cpu.arch == .aarch64) {
+        cvvdp.root_module.addCSourceFile(.{
+            .file = b.path("src/cvvdp_neon.c"),
+            .flags = &cvvdp_flags,
+        });
+    }
     cvvdp.root_module.addIncludePath(b.path("."));
+    cvvdp.lto = if (flto) .full else null;
     b.installArtifact(cvvdp);
 
     // cvvdp.h

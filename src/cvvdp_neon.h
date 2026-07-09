@@ -29,8 +29,7 @@ static inline float32x4_t cvvdp_neon_madd_n(const float32x4_t acc,
     return vaddq_f32(acc, vmulq_n_f32(v, scale));
 }
 
-static inline float32x4_t cvvdp_neon_load_even4(const float* const p)
-{
+static inline float32x4_t cvvdp_neon_load_even4(const float* const p) {
     return vld2q_f32(p).val[0];
 }
 

@@ -18,13 +18,6 @@
 #include "lut.h"
 #include "util.h"
 #include "internal.h"
-#if defined(__aarch64__)
-#include "cvvdp_neon.h"
-#elif defined(__x86_64__)
-#include "cvvdp_avx2.h"
-#else
-#include "cvvdp_c.h"
-#endif
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -32,6 +25,50 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+
+static const CvvdpSimdDispatch* g_cvvdp_dispatch = NULL;
+static pthread_once_t g_cvvdp_dispatch_once = PTHREAD_ONCE_INIT;
+
+static void cvvdp_init_dispatch_once(void) {
+    g_cvvdp_dispatch = cvvdp_resolve_dispatch();
+}
+
+const CvvdpSimdDispatch* cvvdp_resolve_dispatch(void) {
+#if defined(__x86_64__)
+    if (cvvdp_x86_has_avx2_fma())
+        return &cvvdp_dispatch_avx2;
+#elif defined(__aarch64__)
+    return &cvvdp_dispatch_neon;
+#endif
+    return &cvvdp_dispatch_c;
+}
+
+#define cvvdp_apply_display_impl(d, s, e) \
+    g_cvvdp_dispatch->apply_display((d), (s), (e))
+#define cvvdp_rgb_to_xyz_impl(d, s, e) \
+    g_cvvdp_dispatch->rgb_to_xyz((d), (s), (e))
+#define cvvdp_xyz_to_dkl_impl(d, s, e) \
+    g_cvvdp_dispatch->xyz_to_dkl((d), (s), (e))
+#define cvvdp_compute_temporal_channels_impl(d, s, e) \
+    g_cvvdp_dispatch->compute_temporal_channels((d), (s), (e))
+#define cvvdp_gauss_pyr_reduce_impl(d, s, e) \
+    g_cvvdp_dispatch->gauss_pyr_reduce((d), (s), (e))
+#define cvvdp_gauss_pyr_expand_impl(d, s, e) \
+    g_cvvdp_dispatch->gauss_pyr_expand((d), (s), (e))
+#define cvvdp_contrast_impl(d, s, e) \
+    g_cvvdp_dispatch->contrast((d), (s), (e))
+#define cvvdp_luma_contrast_impl(d, s, e) \
+    g_cvvdp_dispatch->luma_contrast((d), (s), (e))
+#define cvvdp_normalize_impl(d, s, e) \
+    g_cvvdp_dispatch->normalize((d), (s), (e))
+#define cvvdp_min_abs_impl(d, s, e) \
+    g_cvvdp_dispatch->min_abs((d), (s), (e))
+#define cvvdp_blur_horizontal_impl(d, s, e) \
+    g_cvvdp_dispatch->blur_horizontal((d), (s), (e))
+#define cvvdp_blur_vertical_impl(d, s, e) \
+    g_cvvdp_dispatch->blur_vertical((d), (s), (e))
+#define cvvdp_baseband_diff_impl(d, s, e) \
+    g_cvvdp_dispatch->baseband_diff((d), (s), (e))
 
 static inline float srgb_to_linear(const float v) {
     if (v <= 0.04045f) return v / 12.92f;
@@ -1623,6 +1660,8 @@ FcvvdpError cvvdp_create(const int width,
     if (!out_c) return CVVDP_ERROR_NULL_POINTER;
     *out_c = NULL;
     if (width <= 0 || height <= 0) return CVVDP_ERROR_INVALID_DIMENSIONS;
+
+    pthread_once(&g_cvvdp_dispatch_once, cvvdp_init_dispatch_once);
 
     FcvvdpCtx* const c = (FcvvdpCtx*)calloc(1, sizeof(FcvvdpCtx));
     if (!c) return CVVDP_ERROR_OUT_OF_MEMORY;
