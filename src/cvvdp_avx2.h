@@ -23,8 +23,8 @@
 #include "util.h"
 
 static inline __m256 cvvdp_avx2_madd_n(const __m256 acc,
-                                            const __m256 v,
-                                            const float scale)
+                                       const __m256 v,
+                                       const float scale)
 {
     return _mm256_add_ps(acc, _mm256_mul_ps(v, _mm256_set1_ps(scale)));
 }
@@ -35,8 +35,7 @@ static inline __m256 cvvdp_avx2_abs_ps(const __m256 v)
     return _mm256_andnot_ps(sign, v);
 }
 
-static inline __m256 cvvdp_avx2_load_even8(const float* const p)
-{
+static inline __m256 cvvdp_avx2_load_even8(const float* const p) {
     const __m128 a0 = _mm_loadu_ps(p);
     const __m128 a1 = _mm_loadu_ps(p + 4);
     const __m128 b0 = _mm_loadu_ps(p + 8);
