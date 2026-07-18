@@ -337,7 +337,8 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     print("\x1b[38;5;208mfcvvdp\x1b[0m by Halide Compression, LLC | {s}\n", .{c.cvvdp_version_string()});
 
-    var args = std.process.Args.iterate(init.minimal.args);
+    var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, allocator);
+    defer args.deinit();
     _ = args.next();
 
     var ref_filename: ?[]const u8 = null;
