@@ -35,18 +35,36 @@ static inline __m256 cvvdp_avx2_abs_ps(const __m256 v)
     return _mm256_andnot_ps(sign, v);
 }
 
-static inline __m256 cvvdp_avx2_load_even8(const float* const p) {
-    const __m128 a0 = _mm_loadu_ps(p);
-    const __m128 a1 = _mm_loadu_ps(p + 4);
-    const __m128 b0 = _mm_loadu_ps(p + 8);
-    const __m128 b1 = _mm_loadu_ps(p + 12);
-    const __m128 ea0 = _mm_shuffle_ps(a0, a0, _MM_SHUFFLE(2, 0, 2, 0));
-    const __m128 ea1 = _mm_shuffle_ps(a1, a1, _MM_SHUFFLE(2, 0, 2, 0));
-    const __m128 eb0 = _mm_shuffle_ps(b0, b0, _MM_SHUFFLE(2, 0, 2, 0));
-    const __m128 eb1 = _mm_shuffle_ps(b1, b1, _MM_SHUFFLE(2, 0, 2, 0));
-    const __m128 lo = _mm_movelh_ps(ea0, ea1);
-    const __m128 hi = _mm_movelh_ps(eb0, eb1);
-    return _mm256_insertf128_ps(_mm256_castps128_ps256(lo), hi, 1);
+static inline __m256 cvvdp_avx2_pack_even8(const __m256 lo,
+                                           const __m256 hi)
+{
+    const __m256 shuffled = _mm256_shuffle_ps(lo, hi, _MM_SHUFFLE(2, 0, 2, 0));
+    return _mm256_permutevar8x32_ps(
+        shuffled, _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7));
+}
+
+static inline __m256 cvvdp_avx2_gauss5_even8(const float* const p) {
+    const __m256 w0 = _mm256_set1_ps(GAUSS_PYR_KERNEL[0]);
+    const __m256 w1 = _mm256_set1_ps(GAUSS_PYR_KERNEL[1]);
+    const __m256 w2 = _mm256_set1_ps(GAUSS_PYR_KERNEL[2]);
+
+    const __m256 lo_outer = _mm256_add_ps(_mm256_loadu_ps(p),
+                                           _mm256_loadu_ps(p + 4));
+    const __m256 lo_inner = _mm256_add_ps(_mm256_loadu_ps(p + 1),
+                                           _mm256_loadu_ps(p + 3));
+    __m256 lo = _mm256_mul_ps(_mm256_loadu_ps(p + 2), w2);
+    lo = _mm256_fmadd_ps(lo_outer, w0, lo);
+    lo = _mm256_fmadd_ps(lo_inner, w1, lo);
+
+    const __m256 hi_outer = _mm256_add_ps(_mm256_loadu_ps(p + 8),
+                                           _mm256_loadu_ps(p + 12));
+    const __m256 hi_inner = _mm256_add_ps(_mm256_loadu_ps(p + 9),
+                                           _mm256_loadu_ps(p + 11));
+    __m256 hi = _mm256_mul_ps(_mm256_loadu_ps(p + 10), w2);
+    hi = _mm256_fmadd_ps(hi_outer, w0, hi);
+    hi = _mm256_fmadd_ps(hi_inner, w1, hi);
+
+    return cvvdp_avx2_pack_even8(lo, hi);
 }
 
 static inline void cvvdp_avx2_store_interleaved8(float* const p,
@@ -66,6 +84,100 @@ static inline float cvvdp_avx2_kernel_sum(const float* const kernel,
     for (int k = -radius; k <= radius; k++)
         sum += kernel[k + radius];
     return sum;
+}
+
+static inline bool cvvdp_avx2_is_symmetric8(const float* const kernel,
+                                            const int radius)
+{
+    if (radius != 8) return false;
+    for (int k = 0; k < 8; k++)
+        if (kernel[k] != kernel[16 - k]) return false;
+    return true;
+}
+
+static inline __m256 cvvdp_avx2_blur_h_symmetric8(
+    const float* const p,
+    const float* const kernel)
+{
+    __m256 sum0 = _mm256_mul_ps(_mm256_loadu_ps(p),
+                                 _mm256_set1_ps(kernel[8]));
+    __m256 sum1 = _mm256_mul_ps(
+        _mm256_add_ps(_mm256_loadu_ps(p - 2), _mm256_loadu_ps(p + 2)),
+        _mm256_set1_ps(kernel[10]));
+    __m256 sum2 = _mm256_mul_ps(
+        _mm256_add_ps(_mm256_loadu_ps(p - 3), _mm256_loadu_ps(p + 3)),
+        _mm256_set1_ps(kernel[11]));
+
+    sum0 = cvvdp_avx2_madd_n(
+        sum0,
+        _mm256_add_ps(_mm256_loadu_ps(p - 1), _mm256_loadu_ps(p + 1)),
+        kernel[9]);
+    sum0 = cvvdp_avx2_madd_n(
+        sum0,
+        _mm256_add_ps(_mm256_loadu_ps(p - 4), _mm256_loadu_ps(p + 4)),
+        kernel[12]);
+    sum0 = cvvdp_avx2_madd_n(
+        sum0,
+        _mm256_add_ps(_mm256_loadu_ps(p - 7), _mm256_loadu_ps(p + 7)),
+        kernel[15]);
+    sum1 = cvvdp_avx2_madd_n(
+        sum1,
+        _mm256_add_ps(_mm256_loadu_ps(p - 5), _mm256_loadu_ps(p + 5)),
+        kernel[13]);
+    sum1 = cvvdp_avx2_madd_n(
+        sum1,
+        _mm256_add_ps(_mm256_loadu_ps(p - 8), _mm256_loadu_ps(p + 8)),
+        kernel[16]);
+    sum2 = cvvdp_avx2_madd_n(
+        sum2,
+        _mm256_add_ps(_mm256_loadu_ps(p - 6), _mm256_loadu_ps(p + 6)),
+        kernel[14]);
+
+    return _mm256_add_ps(_mm256_add_ps(sum0, sum1), sum2);
+}
+
+static inline __m256 cvvdp_avx2_blur_v_symmetric8(
+    const float* const p,
+    const size_t stride,
+    const float* const kernel)
+{
+    __m256 sum0 = _mm256_mul_ps(_mm256_loadu_ps(p),
+                                 _mm256_set1_ps(kernel[8]));
+    __m256 sum1 = _mm256_mul_ps(
+        _mm256_add_ps(_mm256_loadu_ps(p - 2 * stride),
+                      _mm256_loadu_ps(p + 2 * stride)),
+        _mm256_set1_ps(kernel[10]));
+    __m256 sum2 = _mm256_mul_ps(
+        _mm256_add_ps(_mm256_loadu_ps(p - 3 * stride),
+                      _mm256_loadu_ps(p + 3 * stride)),
+        _mm256_set1_ps(kernel[11]));
+
+    sum0 = cvvdp_avx2_madd_n(
+        sum0,
+        _mm256_add_ps(_mm256_loadu_ps(p - stride),
+                      _mm256_loadu_ps(p + stride)), kernel[9]);
+    sum0 = cvvdp_avx2_madd_n(
+        sum0,
+        _mm256_add_ps(_mm256_loadu_ps(p - 4 * stride),
+                      _mm256_loadu_ps(p + 4 * stride)), kernel[12]);
+    sum0 = cvvdp_avx2_madd_n(
+        sum0,
+        _mm256_add_ps(_mm256_loadu_ps(p - 7 * stride),
+                      _mm256_loadu_ps(p + 7 * stride)), kernel[15]);
+    sum1 = cvvdp_avx2_madd_n(
+        sum1,
+        _mm256_add_ps(_mm256_loadu_ps(p - 5 * stride),
+                      _mm256_loadu_ps(p + 5 * stride)), kernel[13]);
+    sum1 = cvvdp_avx2_madd_n(
+        sum1,
+        _mm256_add_ps(_mm256_loadu_ps(p - 8 * stride),
+                      _mm256_loadu_ps(p + 8 * stride)), kernel[16]);
+    sum2 = cvvdp_avx2_madd_n(
+        sum2,
+        _mm256_add_ps(_mm256_loadu_ps(p - 6 * stride),
+                      _mm256_loadu_ps(p + 6 * stride)), kernel[14]);
+
+    return _mm256_add_ps(_mm256_add_ps(sum0, sum1), sum2);
 }
 
 static inline void cvvdp_apply_display_impl(
@@ -419,6 +531,7 @@ static inline void cvvdp_blur_horizontal_impl(
     const int row_end = imin(end, height);
     const float full_wsum = cvvdp_avx2_kernel_sum(data->kernel, radius);
     const __m256 inv_full_wsum = _mm256_set1_ps(1.0f / full_wsum);
+    const bool symmetric8 = cvvdp_avx2_is_symmetric8(data->kernel, radius);
 
     for (int y = start; y < row_end; y++) {
         const float* const src_row = data->src + (size_t)y * width;
@@ -441,10 +554,16 @@ static inline void cvvdp_blur_horizontal_impl(
 
         const int interior_end = width - radius;
         for (; x + 8 <= interior_end; x += 8) {
-            __m256 sum = _mm256_set1_ps(0.0f);
-            for (int k = -radius; k <= radius; k++) {
-                const __m256 src = _mm256_loadu_ps(src_row + x + k);
-                sum = cvvdp_avx2_madd_n(sum, src, data->kernel[k + radius]);
+            __m256 sum;
+            if (symmetric8) {
+                sum = cvvdp_avx2_blur_h_symmetric8(src_row + x, data->kernel);
+            } else {
+                sum = _mm256_setzero_ps();
+                for (int k = -radius; k <= radius; k++) {
+                    const __m256 src = _mm256_loadu_ps(src_row + x + k);
+                    sum = cvvdp_avx2_madd_n(
+                        sum, src, data->kernel[k + radius]);
+                }
             }
             _mm256_storeu_ps(dst_row + x, _mm256_mul_ps(sum, inv_full_wsum));
         }
@@ -476,6 +595,7 @@ static inline void cvvdp_blur_vertical_impl(
     const int row_end = imin(end, height);
     const float full_wsum = cvvdp_avx2_kernel_sum(data->kernel, radius);
     const __m256 inv_full_wsum = _mm256_set1_ps(1.0f / full_wsum);
+    const bool symmetric8 = cvvdp_avx2_is_symmetric8(data->kernel, radius);
 
     for (int y = start; y < row_end; y++) {
         float* const dst_row = data->dst + (size_t)y * width;
@@ -499,12 +619,20 @@ static inline void cvvdp_blur_vertical_impl(
 
         int x = 0;
         for (; x + 8 <= width; x += 8) {
-            __m256 sum = _mm256_set1_ps(0.0f);
-            for (int k = -radius; k <= radius; k++) {
-                const float* const src_row =
-                    data->src + (size_t)(y + k) * width;
-                const __m256 src = _mm256_loadu_ps(src_row + x);
-                sum = cvvdp_avx2_madd_n(sum, src, data->kernel[k + radius]);
+            __m256 sum;
+            if (symmetric8) {
+                sum = cvvdp_avx2_blur_v_symmetric8(
+                    data->src + (size_t)y * width + x,
+                    (size_t)width, data->kernel);
+            } else {
+                sum = _mm256_setzero_ps();
+                for (int k = -radius; k <= radius; k++) {
+                    const float* const src_row =
+                        data->src + (size_t)(y + k) * width;
+                    const __m256 src = _mm256_loadu_ps(src_row + x);
+                    sum = cvvdp_avx2_madd_n(
+                        sum, src, data->kernel[k + radius]);
+                }
             }
             _mm256_storeu_ps(dst_row + x, _mm256_mul_ps(sum, inv_full_wsum));
         }
@@ -572,19 +700,25 @@ static inline void cvvdp_gauss_pyr_reduce_impl(
         for (; dx + 8 <= vector_x_end; dx += 8) {
             const int sx2 = dx << 1;
             const int sy2 = dy << 1;
-            __m256 val = _mm256_set1_ps(0.0f);
-
-            for (int ky = -2; ky <= 2; ky++) {
-                const float wy = GAUSS_PYR_KERNEL[ky + 2];
-                const float* const src_row =
-                    data->src + (size_t)(sy2 + ky) * data->src_w;
-                for (int kx = -2; kx <= 2; kx++) {
-                    const __m256 src =
-                        cvvdp_avx2_load_even8(src_row + sx2 + kx);
-                    const float weight = wy * GAUSS_PYR_KERNEL[kx + 2];
-                    val = cvvdp_avx2_madd_n(val, src, weight);
-                }
-            }
+            const float* const src0 =
+                data->src + (size_t)(sy2 - 2) * data->src_w + sx2 - 2;
+            const float* const src1 = src0 + data->src_w;
+            const float* const src2 = src1 + data->src_w;
+            const float* const src3 = src2 + data->src_w;
+            const float* const src4 = src3 + data->src_w;
+            const __m256 outer = _mm256_add_ps(
+                cvvdp_avx2_gauss5_even8(src0),
+                cvvdp_avx2_gauss5_even8(src4));
+            const __m256 inner = _mm256_add_ps(
+                cvvdp_avx2_gauss5_even8(src1),
+                cvvdp_avx2_gauss5_even8(src3));
+            __m256 val = _mm256_mul_ps(
+                cvvdp_avx2_gauss5_even8(src2),
+                _mm256_set1_ps(GAUSS_PYR_KERNEL[2]));
+            val = _mm256_fmadd_ps(
+                outer, _mm256_set1_ps(GAUSS_PYR_KERNEL[0]), val);
+            val = _mm256_fmadd_ps(
+                inner, _mm256_set1_ps(GAUSS_PYR_KERNEL[1]), val);
 
             _mm256_storeu_ps(dst_row + dx, val);
         }
@@ -665,35 +799,52 @@ static inline void cvvdp_gauss_pyr_expand_impl(
 
         for (; n + 8 <= n_end; n += 8) {
             const int parity_y = dy & 1;
-            __m256 even = _mm256_set1_ps(0.0f);
-            __m256 odd = _mm256_set1_ps(0.0f);
+            __m256 left;
+            __m256 center;
+            __m256 right;
 
-            for (int ky = -2 + parity_y; ky <= 2; ky += 2) {
-                const int sy = (dy + ky) >> 1;
-                const float wy = 4.0f * GAUSS_PYR_KERNEL[ky + 2];
-                const float* const src_row = data->src + (size_t)sy * src_w;
-                __m256 h_even = _mm256_set1_ps(0.0f);
-                __m256 h_odd = _mm256_set1_ps(0.0f);
-
-                h_even =
-                    cvvdp_avx2_madd_n(h_even, _mm256_loadu_ps(src_row + n - 1),
-                                      GAUSS_PYR_KERNEL[0]);
-                h_even =
-                    cvvdp_avx2_madd_n(h_even, _mm256_loadu_ps(src_row + n),
-                                      GAUSS_PYR_KERNEL[2]);
-                h_even =
-                    cvvdp_avx2_madd_n(h_even, _mm256_loadu_ps(src_row + n + 1),
-                                      GAUSS_PYR_KERNEL[4]);
-                h_odd =
-                    cvvdp_avx2_madd_n(h_odd, _mm256_loadu_ps(src_row + n),
-                                      GAUSS_PYR_KERNEL[1]);
-                h_odd =
-                    cvvdp_avx2_madd_n(h_odd, _mm256_loadu_ps(src_row + n + 1),
-                                      GAUSS_PYR_KERNEL[3]);
-
-                even = cvvdp_avx2_madd_n(even, h_even, wy);
-                odd = cvvdp_avx2_madd_n(odd, h_odd, wy);
+            if (parity_y) {
+                const float* const src0 =
+                    data->src + (size_t)(dy >> 1) * src_w + n;
+                const float* const src1 = src0 + src_w;
+                left = _mm256_add_ps(_mm256_loadu_ps(src0 - 1),
+                                     _mm256_loadu_ps(src1 - 1));
+                center = _mm256_add_ps(_mm256_loadu_ps(src0),
+                                       _mm256_loadu_ps(src1));
+                right = _mm256_add_ps(_mm256_loadu_ps(src0 + 1),
+                                      _mm256_loadu_ps(src1 + 1));
+            } else {
+                const float* const src0 =
+                    data->src + (size_t)((dy >> 1) - 1) * src_w + n;
+                const float* const src1 = src0 + src_w;
+                const float* const src2 = src1 + src_w;
+                const __m256 vouter = _mm256_set1_ps(4.0f * GAUSS_PYR_KERNEL[0]);
+                const __m256 vcenter = _mm256_set1_ps(4.0f * GAUSS_PYR_KERNEL[2]);
+                left = _mm256_mul_ps(
+                    _mm256_add_ps(_mm256_loadu_ps(src0 - 1),
+                                  _mm256_loadu_ps(src2 - 1)), vouter);
+                left = _mm256_fmadd_ps(_mm256_loadu_ps(src1 - 1),
+                                       vcenter, left);
+                center = _mm256_mul_ps(
+                    _mm256_add_ps(_mm256_loadu_ps(src0),
+                                  _mm256_loadu_ps(src2)), vouter);
+                center = _mm256_fmadd_ps(_mm256_loadu_ps(src1),
+                                         vcenter, center);
+                right = _mm256_mul_ps(
+                    _mm256_add_ps(_mm256_loadu_ps(src0 + 1),
+                                  _mm256_loadu_ps(src2 + 1)), vouter);
+                right = _mm256_fmadd_ps(_mm256_loadu_ps(src1 + 1),
+                                        vcenter, right);
             }
+
+            const __m256 side = _mm256_add_ps(left, right);
+            __m256 even = _mm256_mul_ps(
+                center, _mm256_set1_ps(GAUSS_PYR_KERNEL[2]));
+            even = _mm256_fmadd_ps(
+                side, _mm256_set1_ps(GAUSS_PYR_KERNEL[0]), even);
+            const __m256 odd = _mm256_mul_ps(
+                _mm256_add_ps(center, right),
+                _mm256_set1_ps(GAUSS_PYR_KERNEL[1]));
 
             cvvdp_avx2_store_interleaved8(dst_row + (n << 1), even, odd);
         }
