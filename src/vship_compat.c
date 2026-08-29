@@ -48,6 +48,11 @@
  * models both apply the same clamp-and-scale, so values pass through
  * unscaled. PQ passes through unscaled either way ([0,100] hits fcvvdp's
  * HDR x100 exactly like Vship's PQ display encode).
+ *
+ * Both sides are linearized with the REFERENCE side's transfer (a no-op
+ * when they share one), see the comment in fcvvdp_vship_create; this keeps
+ * fcvvdp's reference-normalized contrast stage from amplifying a TRC-tag
+ * mismatch into an inter-side gain error that Vship's GPU core damps.
  */
 #include "vship_compat.h"
 
@@ -622,6 +627,23 @@ FcvvdpError fcvvdp_vship_create(FcvvdpVshipCtx** const out_ctx,
 
     err = side_init(&vc->src, src_colorspace);
     if (err == CVVDP_OK) err = side_init(&vc->dis, dis_colorspace);
+    if (err == CVVDP_OK) {
+        /*
+         * Both streams must leave the shim on a COMMON transfer. Vship's GPU
+         * core normalizes each stream's contrast by its own background
+         * (lpyr.hpp stores Lbkg1 and Lbkg2 separately), so the per-side TRC
+         * linearization of YUVToLinRGBPipeline never turns a TRC mismatch
+         * into an inter-side gain there. fcvvdp's core normalizes the
+         * distorted stream by the reference stream's background (cvvdp.c
+         * process_pyramid only fills L_bkg_pyr during the reference pass),
+         * so the same mismatch arrives as a full contrast error: identical
+         * content tagged BT470_BG vs BT709 measured -0.498 JOD where the
+         * GPU metric reports 9.81. Linearizing the distorted side with the
+         * reference transfer removes the gain exactly where the GPU path
+         * damps it; when both sides share a TRC this is a no-op.
+         */
+        vc->dis.cfg.trc = vc->src.cfg.trc;
+    }
     if (err == CVVDP_OK &&
         (vc->src.cfg.final_width != vc->dis.cfg.final_width ||
          vc->src.cfg.final_height != vc->dis.cfg.final_height))
