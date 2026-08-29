@@ -259,7 +259,7 @@ const char* cvvdp_error_string(FcvvdpError error);
  *
  * @return Version string (e.g., "X.Y.Z")
  */
-static const char* cvvdp_version_string(void) {
+static inline const char* cvvdp_version_string(void) {
     return CVVDP_VERSION;
 }
 

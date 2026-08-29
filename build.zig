@@ -58,6 +58,7 @@ pub fn build(b: *std.Build) void {
     const cvvdp_sources = [_][]const u8{
         "src/cvvdp.c",
         "src/cvvdp_c.c",
+        "src/vship_compat.c",
     };
     const cvvdp_flags = [_][]const u8{
         "-std=c23",
@@ -90,6 +91,7 @@ pub fn build(b: *std.Build) void {
 
     // cvvdp.h
     cvvdp.installHeader(b.path("src/cvvdp.h"), "cvvdp.h");
+    cvvdp.installHeader(b.path("src/vship_compat.h"), "vship_compat.h");
 
     // 'fcvvdp' executable
     const cvvdpenc = b.addExecutable(.{
