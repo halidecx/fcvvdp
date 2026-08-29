@@ -58,8 +58,11 @@ typedef enum FcvvdpVshipRange_t {
 } FcvvdpVshipRange_t;
 
 typedef struct FcvvdpVshipChromaSubsample_t {
-    int subw; // log2 horizontal subsampling factor (0, 1 or 2)
-    int subh; // log2 vertical subsampling factor (0, 1 or 2)
+    // log2 horizontal/vertical subsampling factors. The mirrored Vship ABI
+    // permits 0..2, but this shim only accepts 0 (4:4:4) and 1 (4:2:2/4:2:0);
+    // values >= 2 return CVVDP_ERROR_INVALID_FORMAT.
+    int subw;
+    int subh;
 } FcvvdpVshipChromaSubsample_t;
 
 typedef enum FcvvdpVshipChromaLocation_t {

@@ -210,9 +210,13 @@ static FcvvdpError side_alloc(Side* const s) {
     if (npix > (uint64_t)(SIZE_MAX / (3 * sizeof(float))))
         return CVVDP_ERROR_OUT_OF_MEMORY;
 
+    const uint64_t fpx =
+        (uint64_t)cfg->final_width * (uint64_t)cfg->final_height;
+    if (fpx > (uint64_t)(SIZE_MAX / (3 * (size_t)cfg->out_bytes)))
+        return CVVDP_ERROR_OUT_OF_MEMORY;
+
     s->conv = calloc((size_t)(npix * 3), sizeof(float));
-    s->out = calloc((size_t)cfg->final_width * (size_t)cfg->final_height * 3,
-                    (size_t)cfg->out_bytes);
+    s->out = calloc((size_t)(fpx * 3), (size_t)cfg->out_bytes);
     if (!s->conv || !s->out) return CVVDP_ERROR_OUT_OF_MEMORY;
 
     s->img.width = cfg->final_width;
