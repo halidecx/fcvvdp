@@ -17,19 +17,37 @@
 
 /*
  * Vship-C-API compatibility layer: converts Vship-style planar frames to
- * fcvvdp's interleaved RGB and drives an inner FcvvdpCtx.
+ * fcvvdp's interleaved linear RGB (float) and drives an inner FcvvdpCtx.
  *
- * Sample/range semantics mirror Vship's GPU converter exactly (see
- * Vship/src/HIP/gpuColorToLinear/anyDepthToFloat.hpp + rangeToFull.hpp):
- * 2-byte samples are native-endian u16 containers masked to the sample bit
- * depth; full range divides by (2^bits - 1) and centers chroma at -0.5;
- * limited range normalizes to 8-bit units then expands with the studio
- * swing ((v-16)/219 luma, (v-128)/224 chroma); FLOAT limited scales by 256
- * first, FLOAT full is [0,1] with chroma centered at -0.5.
+ * The pipeline mirrors Vship's GPU CVVDP converter (see
+ * Vship/src/HIP/gpuColorToLinear/vshipColor.hpp Converter::convert):
+ * range expansion -> chroma upsampling -> YUV matrix -> transfer
+ * linearization -> resize/crop. Sample semantics mirror
+ * anyDepthToFloat.hpp + rangeToFull.hpp: 2-byte samples are native-endian
+ * u16 containers masked to the sample bit depth; full range divides by
+ * (2^bits - 1) and centers chroma at -0.5; limited range normalizes to
+ * 8-bit units then expands with the studio swing ((v-16)/219 luma,
+ * (v-128)/224 chroma); FLOAT limited scales by 256 first, FLOAT full is
+ * [0,1] with chroma centered at -0.5. Chroma upsampling is the bicubic
+ * Hermite spline of chromaUpsample.hpp with Vship's chroma siting.
  *
- * The conversion stays in the source transfer encoding (gamma domain);
- * the transfer function is only mapped onto FcvvdpImage.colorspace, which
- * fcvvdp currently ignores and always applies its sRGB OETF to u8/u16 data.
+ * The output is linear RGB consumed as-is by cvvdp_load_image's
+ * RGB_FLOAT path. Per-TRC output scale, matching the linear RGB that
+ * Vship's GPU CVVDP core consumes (YUVToLinRGBPipeline feeding
+ * linRGB_to_dkl_DisplayEncode, cvvdp/colors.hpp):
+ *  - SDR TRCs (linear, sRGB, BT709 pure gamma 2.4, gamma 2.2, gamma 2.8,
+ *    ST240, ST428): linear [0,1] (ST428 reaches ~1.091)
+ *  - PQ: linear [0,100] (Lmax = 100)
+ *  - HLG: inverse OETF + OOTF gamma 1.2, linear [0,1]
+ * fcvvdp's display model (cvvdp_apply_display_impl in cvvdp_c.h)
+ * multiplies input by 100 on HDR display models and clamps to Y_peak;
+ * Vship instead routes every non-PQ transfer through the SDR display
+ * encode formula, scaling by (Y_peak - Y_black). On HDR display models,
+ * non-PQ values are therefore pre-scaled by (Y_peak - Y_black) / 100 so
+ * both chains land on identical display-encoded nits; on SDR display
+ * models both apply the same clamp-and-scale, so values pass through
+ * unscaled. PQ passes through unscaled either way ([0,100] hits fcvvdp's
+ * HDR x100 exactly like Vship's PQ display encode).
  */
 #include "vship_compat.h"
 
@@ -53,13 +71,13 @@ typedef struct {
     int bits; // 8..16, 1 for float (Vship's bitprecisionSample)
     int bytes_per_sample; // 1, 2 or 4
     int is_float;
-    int out_bytes; // 1 for u8 output, 2 for u16
 } SideCfg;
 
 typedef struct {
     SideCfg cfg;
-    float* conv; // width*height*3 interleaved RGB, source encoding, [0,1]
-    uint8_t* out; // final_width*final_height*3*out_bytes, packed
+    float* conv; // width*height*3 interleaved linear RGB, per-TRC scale
+    float* out; // final_width*final_height*3 interleaved linear RGB
+    float out_scale;
     FcvvdpImage img;
 } Side;
 
@@ -93,17 +111,25 @@ static FcvvdpError model_from_key(const char* const key,
     return CVVDP_ERROR_INVALID_MODEL;
 }
 
+/*
+ * the image data is already linear, so the colorspace field only states
+ * that no further transfer decoding is needed (fcvvdp currently ignores
+ * the field for RGB_FLOAT input)
+ */
 static FcvvdpColorspace trc_to_colorspace(const int trc) {
-    switch (trc) {
-        case FCVVDP_VSHIP_TRC_PQ:
-            return CVVDP_COLORSPACE_PQ;
-        case FCVVDP_VSHIP_TRC_HLG:
-            return CVVDP_COLORSPACE_HLG;
-        case FCVVDP_VSHIP_TRC_LINEAR:
-            return CVVDP_COLORSPACE_LINEAR;
-        default:
-            return CVVDP_COLORSPACE_SRGB;
-    }
+    (void)trc;
+    return CVVDP_COLORSPACE_LINEAR;
+}
+
+/*
+ * pre-scale for fcvvdp's display model, see the file header comment;
+ * Y_black = max_luminance / contrast like Vship's DisplayModel
+ * (cvvdp/display_models.hpp getBlackLevel) and fcvvdp's cvvdp_init_display
+ */
+static float trc_output_scale(const SideCfg* const cfg,
+                              const FcvvdpDisplayParams* const dp) {
+    if (cfg->trc == FCVVDP_VSHIP_TRC_PQ || !dp->is_hdr) return 1.0f;
+    return (dp->max_luminance - dp->max_luminance / dp->contrast) / 100.0f;
 }
 
 static FcvvdpError side_init(Side* const s,
@@ -186,6 +212,23 @@ static FcvvdpError side_init(Side* const s,
         cs->range != FCVVDP_VSHIP_RANGE_FULL)
         return CVVDP_ERROR_INVALID_FORMAT;
 
+    switch (cs->transferFunction) {
+        case FCVVDP_VSHIP_TRC_BT709:
+        case FCVVDP_VSHIP_TRC_BT470_M:
+        case FCVVDP_VSHIP_TRC_BT470_BG:
+        case FCVVDP_VSHIP_TRC_BT601:
+        case FCVVDP_VSHIP_TRC_ST240_M:
+        case FCVVDP_VSHIP_TRC_LINEAR:
+        case FCVVDP_VSHIP_TRC_SRGB:
+        case FCVVDP_VSHIP_TRC_PQ:
+        case FCVVDP_VSHIP_TRC_ST428:
+        case FCVVDP_VSHIP_TRC_HLG:
+            cfg->trc = (int)cs->transferFunction;
+            break;
+        default:
+            return CVVDP_ERROR_INVALID_FORMAT;
+    }
+
     cfg->width = cs->width;
     cfg->height = cs->height;
     cfg->target_width = tw;
@@ -198,8 +241,6 @@ static FcvvdpError side_init(Side* const s,
     cfg->subh = cs->subsampling.subh;
     cfg->chroma_location = (int)cs->chromaLocation;
     cfg->range = (int)cs->range;
-    cfg->trc = (int)cs->transferFunction;
-    cfg->out_bytes = cs->sample == FCVVDP_VSHIP_SAMPLE_UINT8 ? 1 : 2;
 
     return CVVDP_OK;
 }
@@ -212,19 +253,18 @@ static FcvvdpError side_alloc(Side* const s) {
 
     const uint64_t fpx =
         (uint64_t)cfg->final_width * (uint64_t)cfg->final_height;
-    if (fpx > (uint64_t)(SIZE_MAX / (3 * (size_t)cfg->out_bytes)))
+    if (fpx > (uint64_t)(SIZE_MAX / (3 * sizeof(float))))
         return CVVDP_ERROR_OUT_OF_MEMORY;
 
     s->conv = calloc((size_t)(npix * 3), sizeof(float));
-    s->out = calloc((size_t)(fpx * 3), (size_t)cfg->out_bytes);
+    s->out = calloc((size_t)(fpx * 3), sizeof(float));
     if (!s->conv || !s->out) return CVVDP_ERROR_OUT_OF_MEMORY;
 
     s->img.width = cfg->final_width;
     s->img.height = cfg->final_height;
-    s->img.stride = cfg->final_width * 3 * cfg->out_bytes;
+    s->img.stride = cfg->final_width * 3 * (int)sizeof(float);
     s->img.data = s->out;
-    s->img.format = cfg->out_bytes == 1 ? CVVDP_PIXEL_FORMAT_RGB_UINT8
-                                        : CVVDP_PIXEL_FORMAT_RGB_UINT16;
+    s->img.format = CVVDP_PIXEL_FORMAT_RGB_FLOAT;
     s->img.colorspace = trc_to_colorspace(cfg->trc);
 
     return CVVDP_OK;
@@ -270,36 +310,60 @@ static float fetch_plane_value(const SideCfg* const cfg,
     return v;
 }
 
-/* bilinear over raw plane samples, edge-clamped */
-static float sample_plane(const SideCfg* const cfg, const uint8_t* const plane,
-                          const int64_t stride, const int pw, const int ph,
-                          const float sx, const float sy, const int chroma) {
-    const float xc = sx < 0.0f ? 0.0f
-                               : sx > (float)(pw - 1) ? (float)(pw - 1) : sx;
-    const float yc = sy < 0.0f ? 0.0f
-                               : sy > (float)(ph - 1) ? (float)(ph - 1) : sy;
-    const int x0 = (int)xc;
-    const int y0 = (int)yc;
-    const int x1 = x0 + 1 < pw ? x0 + 1 : x0;
-    const int y1 = y0 + 1 < ph ? y0 + 1 : y0;
-    const float fx = xc - (float)x0;
-    const float fy = yc - (float)y0;
-
-    const float v00 =
-        expand_range(cfg, fetch_plane_value(cfg, plane, stride, x0, y0), chroma);
-    const float v01 =
-        expand_range(cfg, fetch_plane_value(cfg, plane, stride, x1, y0), chroma);
-    const float v10 =
-        expand_range(cfg, fetch_plane_value(cfg, plane, stride, x0, y1), chroma);
-    const float v11 =
-        expand_range(cfg, fetch_plane_value(cfg, plane, stride, x1, y1), chroma);
-
-    const float top = v00 + (v01 - v00) * fx;
-    const float bottom = v10 + (v11 - v10) * fx;
-    return top + (bottom - top) * fy;
+/* cubic Hermite spline with Catmull-Rom tangents and Vship's Horner
+   evaluation, mirrors CubicHermitSplineInterpolator
+   (gpuColorToLinear/resize.hpp) */
+static float hermit_eval(const float pm1, const float p0, const float p1,
+                         const float p2, const float t) {
+    const float m0 = (p1 - pm1) * 0.5f;
+    const float m1 = (p2 - p0) * 0.5f;
+    const float c3 = 2.0f * p0 + m0 - 2.0f * p1 + m1;
+    const float c2 = -3.0f * p0 + 3.0f * p1 - 2.0f * m0 - m1;
+    float res = c3;
+    res *= t;
+    res += c2;
+    res *= t;
+    res += m0;
+    res *= t;
+    res += p0;
+    return res;
 }
 
-/* mirrors Vship's ncl_yuv_to_rgb_from_kr_kb (YUVToLinRGB.hpp), gamma domain */
+/* bicubic Hermit chroma upsampling at the correct chroma site, mirroring
+   Vship's chromaUpsample.hpp: co-sited locations (Left/Top) hit samples
+   directly or mid-segment (t = 0.5), Center locations evaluate the
+   neighbouring segments at t = 0.25 / 0.75; taps are edge-replicated like
+   getHorizontalInterpolator_device/getVerticalInterpolator_device */
+static float sample_plane(const SideCfg* const cfg,
+                          const uint8_t* const plane,
+                          const int64_t stride, const int pw, const int ph,
+                          const float sx, const float sy, const int chroma) {
+    const int x0 = (int)floorf(sx);
+    const int y0 = (int)floorf(sy);
+    const float tx = sx - (float)x0;
+    const float ty = sy - (float)y0;
+
+    float rows[4];
+    for (int j = 0; j < 4; j++) {
+        const int yy = iclip(y0 + j - 1, 0, ph - 1);
+        const float t0 = expand_range(
+            cfg, fetch_plane_value(cfg, plane, stride,
+                                   iclip(x0 - 1, 0, pw - 1), yy), chroma);
+        const float t1 = expand_range(
+            cfg, fetch_plane_value(cfg, plane, stride,
+                                   iclip(x0, 0, pw - 1), yy), chroma);
+        const float t2 = expand_range(
+            cfg, fetch_plane_value(cfg, plane, stride,
+                                   iclip(x0 + 1, 0, pw - 1), yy), chroma);
+        const float t3 = expand_range(
+            cfg, fetch_plane_value(cfg, plane, stride,
+                                   iclip(x0 + 2, 0, pw - 1), yy), chroma);
+        rows[j] = hermit_eval(t0, t1, t2, t3, tx);
+    }
+    return hermit_eval(rows[0], rows[1], rows[2], rows[3], ty);
+}
+
+/* mirrors Vship's ncl_yuv_to_rgb_from_kr_kb (YUVToLinRGB.hpp) */
 static void ncl_to_rgb(const float y, const float u, const float v,
                        const float kr, const float kb, float* const r,
                        float* const g, float* const b) {
@@ -338,6 +402,91 @@ static void matrix_to_rgb(const int matrix, const float y, const float u,
     }
 }
 
+/* per-component transfer linearization, mirrors Vship's
+   transferToLinear.hpp transferLinearize<float> specializations, including
+   the signed handling of out-of-gamut values; output scales: SDR TRCs
+   [0,1] (ST428 ~1.091), PQ [0,100] (Lmax = 100) */
+static float linearize_component(const int trc, float a) {
+    switch (trc) {
+        case FCVVDP_VSHIP_TRC_LINEAR:
+            return a;
+        case FCVVDP_VSHIP_TRC_SRGB:
+            if (a < 0.0f) {
+                if (a < -0.04045f)
+                    a = -powf((-a + 0.055f) * (1.0f / 1.055f), 2.4f);
+                else
+                    a *= 1.0f / 12.92f;
+            } else {
+                if (a > 0.04045f)
+                    a = powf((a + 0.055f) * (1.0f / 1.055f), 2.4f);
+                else
+                    a *= 1.0f / 12.92f;
+            }
+            return a;
+        case FCVVDP_VSHIP_TRC_BT709: // pure gamma 2.4, signed
+            return a < 0.0f ? -powf(-a, 2.4f) : powf(a, 2.4f);
+        case FCVVDP_VSHIP_TRC_BT470_M:
+            return a < 0.0f ? -powf(-a, 2.2f) : powf(a, 2.2f);
+        case FCVVDP_VSHIP_TRC_BT470_BG:
+        case FCVVDP_VSHIP_TRC_BT601:
+            return a < 0.0f ? -powf(-a, 2.8f) : powf(a, 2.8f);
+        case FCVVDP_VSHIP_TRC_ST240_M:
+            if (a >= 0.0f) {
+                if (a < 0.0228f)
+                    a = 4.0f * a;
+                else
+                    a = 1.1115f * powf(a, 0.45f) - 0.1115f;
+            } else {
+                if (a > -0.0228f)
+                    a = 4.0f * a;
+                else
+                    a = -1.1115f * powf(-a, 0.45f) + 0.1115f;
+            }
+            return a;
+        case FCVVDP_VSHIP_TRC_ST428: {
+            const float v = a < 0.0f ? -powf(-a, 2.6f) : powf(a, 2.6f);
+            return (float)(v * (52.37 / 48.0));
+        }
+        case FCVVDP_VSHIP_TRC_PQ: {
+            const float n = 0.15930175781250000f;
+            const float m = 78.843750000000000f;
+            const float c1 = 0.83593750000000000f;
+            const float c2 = 18.851562500000000f;
+            const float c3 = 18.687500000000000f;
+            a = fmaxf(a, 0.0f);
+            a = powf(a, 1.0f / m);
+            return 100.0f * powf(fmaxf(0.0f, a - c1) / (c2 - c3 * a),
+                                 1.0f / n);
+        }
+        default: // unreachable, side_init validated the transfer function
+            return a;
+    }
+}
+
+/* HLG linearization on the linear-light float3 (inverse OETF then OOTF
+   gamma 1.2), mirrors transferLinearizeHLG (transferToLinear.hpp);
+   output is linear [0,1] */
+static void linearize_hlg(float rgb[3]) {
+    const float a = 0.17883277f;
+    const float b = 1.0f - 4.0f * a;
+    const float c = 0.5f - a * -0.3350097945111627f;
+
+    // inverse OETF
+    for (int i = 0; i < 3; i++) {
+        const float v = rgb[i];
+        rgb[i] = v <= 0.5f ? v * v / 3.0f
+                           : (expf((v - c) / a) + b) / 12.0f;
+    }
+
+    // OOTF
+    const float ys =
+        0.2627f * rgb[0] + 0.6780f * rgb[1] + 0.0593f * rgb[2];
+    const float ootf = powf(ys, 1.2f - 1.0f);
+    rgb[0] *= ootf;
+    rgb[1] *= ootf;
+    rgb[2] *= ootf;
+}
+
 static void convert_frame(const Side* const s, const uint8_t* const planes[3],
                           const int64_t strides[3]) {
     const SideCfg* const cfg = &s->cfg;
@@ -371,21 +520,17 @@ static void convert_frame(const Side* const s, const uint8_t* const planes[3],
                                           cx, cy, chroma_expand);
             float rgb[3];
             matrix_to_rgb(cfg->matrix, p0, p1, p2, &rgb[0], &rgb[1], &rgb[2]);
+            if (cfg->trc == FCVVDP_VSHIP_TRC_HLG) {
+                linearize_hlg(rgb);
+            } else {
+                for (int c = 0; c < 3; c++)
+                    rgb[c] = linearize_component(cfg->trc, rgb[c]);
+            }
             row[(size_t)x * 3 + 0] = rgb[0];
             row[(size_t)x * 3 + 1] = rgb[1];
             row[(size_t)x * 3 + 2] = rgb[2];
         }
     }
-}
-
-static uint8_t quantize8(const float v) {
-    const float c = fclip(v, 0.0f, 1.0f);
-    return (uint8_t)(int)(c * 255.0f + 0.5f);
-}
-
-static uint16_t quantize16(const float v) {
-    const float c = fclip(v, 0.0f, 1.0f);
-    return (uint16_t)(int)(c * 65535.0f + 0.5f);
 }
 
 static void sample_conv3(const float* const conv, const int w, const int h,
@@ -413,7 +558,8 @@ static void sample_conv3(const float* const conv, const int w, const int h,
 }
 
 /* resize to target then crop, matching Vship's resize-then-crop order;
-   the crop offset is folded into the sampling coordinates */
+   the crop offset is folded into the sampling coordinates. Runs in linear
+   light like Vship, which resizes after YUVToLinRGBPipeline */
 static void finalize_frame(const Side* const s) {
     const SideCfg* const cfg = &s->cfg;
     const int w = (int)cfg->width;
@@ -422,28 +568,19 @@ static void finalize_frame(const Side* const s) {
     const int fh = cfg->final_height;
     const float xw = (float)w / (float)cfg->target_width;
     const float xh = (float)h / (float)cfg->target_height;
-    const int u8_out = cfg->out_bytes == 1;
 
     for (int y = 0; y < fh; y++) {
         const float sy =
             ((float)y + (float)cfg->crop_top + 0.5f) * xh - 0.5f;
+        float* const row = s->out + (size_t)y * fw * 3;
         for (int x = 0; x < fw; x++) {
             const float sx =
                 ((float)x + (float)cfg->crop_left + 0.5f) * xw - 0.5f;
             float rgb[3];
             sample_conv3(s->conv, w, h, sx, sy, rgb);
-            if (u8_out) {
-                uint8_t* const row = s->out + (size_t)y * fw * 3;
-                row[(size_t)x * 3 + 0] = quantize8(rgb[0]);
-                row[(size_t)x * 3 + 1] = quantize8(rgb[1]);
-                row[(size_t)x * 3 + 2] = quantize8(rgb[2]);
-            } else {
-                uint16_t* const row =
-                    (uint16_t*)(s->out + (size_t)y * fw * 6);
-                row[(size_t)x * 3 + 0] = quantize16(rgb[0]);
-                row[(size_t)x * 3 + 1] = quantize16(rgb[1]);
-                row[(size_t)x * 3 + 2] = quantize16(rgb[2]);
-            }
+            row[(size_t)x * 3 + 0] = rgb[0] * s->out_scale;
+            row[(size_t)x * 3 + 1] = rgb[1] * s->out_scale;
+            row[(size_t)x * 3 + 2] = rgb[2] * s->out_scale;
         }
     }
 }
@@ -476,6 +613,10 @@ FcvvdpError fcvvdp_vship_create(FcvvdpVshipCtx** const out_ctx,
     FcvvdpError err = model_from_key(model_key, &model);
     if (err != CVVDP_OK) return err;
 
+    FcvvdpDisplayParams display_params;
+    err = cvvdp_get_display_params(model, &display_params);
+    if (err != CVVDP_OK) return err;
+
     FcvvdpVshipCtx* const vc = calloc(1, sizeof(*vc));
     if (!vc) return CVVDP_ERROR_OUT_OF_MEMORY;
 
@@ -485,6 +626,10 @@ FcvvdpError fcvvdp_vship_create(FcvvdpVshipCtx** const out_ctx,
         (vc->src.cfg.final_width != vc->dis.cfg.final_width ||
          vc->src.cfg.final_height != vc->dis.cfg.final_height))
         err = CVVDP_ERROR_DIMENSION_MISMATCH;
+    if (err == CVVDP_OK) {
+        vc->src.out_scale = trc_output_scale(&vc->src.cfg, &display_params);
+        vc->dis.out_scale = trc_output_scale(&vc->dis.cfg, &display_params);
+    }
     if (err == CVVDP_OK) err = side_alloc(&vc->src);
     if (err == CVVDP_OK) err = side_alloc(&vc->dis);
     if (err == CVVDP_OK)
