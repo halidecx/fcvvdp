@@ -18,6 +18,7 @@
 #include "lut.h"
 #include "util.h"
 #include "internal.h"
+#include "cpu.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -30,15 +31,17 @@ static const CvvdpSimdDispatch* g_cvvdp_dispatch = NULL;
 static pthread_once_t g_cvvdp_dispatch_once = PTHREAD_ONCE_INIT;
 
 static void cvvdp_init_dispatch_once(void) {
+    cvvdp_init_cpu();
     g_cvvdp_dispatch = cvvdp_resolve_dispatch();
 }
 
 const CvvdpSimdDispatch* cvvdp_resolve_dispatch(void) {
 #if defined(__x86_64__)
-    if (cvvdp_x86_has_avx2_fma())
+    if (cvvdp_get_cpu_flags() & CVVDP_CPU_FLAG_AVX2)
         return &cvvdp_dispatch_avx2;
 #elif defined(__aarch64__)
-    return &cvvdp_dispatch_neon;
+    if (cvvdp_get_cpu_flags() & CVVDP_CPU_FLAG_NEON)
+        return &cvvdp_dispatch_neon;
 #endif
     return &cvvdp_dispatch_c;
 }

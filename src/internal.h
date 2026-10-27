@@ -294,35 +294,4 @@ extern const CvvdpSimdDispatch cvvdp_dispatch_neon;
 
 const CvvdpSimdDispatch* cvvdp_resolve_dispatch(void);
 
-#if defined(__x86_64__)
-static int cvvdp_x86_has_avx2_fma(void) {
-    unsigned int eax, ebx, ecx, edx, max_leaf;
-
-    __asm__ volatile("cpuid"
-        : "=a"(max_leaf), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(0));
-    if (max_leaf < 7) return 0;
-
-    __asm__ volatile("cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(1));
-    if (!(ecx & (1u << 26))) return 0;
-    if (!(ecx & (1u << 27))) return 0;
-    if (!(ecx & (1u << 28))) return 0;
-    if (!(ecx & (1u << 12))) return 0;
-
-    unsigned int xcr0_lo, xcr0_hi;
-    __asm__ volatile("xgetbv" : "=a"(xcr0_lo), "=d"(xcr0_hi) : "c"(0));
-    (void)xcr0_hi;
-    if ((xcr0_lo & 0x6u) != 0x6u) return 0;
-
-    __asm__ volatile("cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(7), "c"(0));
-    if (!(ebx & (1u << 5))) return 0;
-
-    return 1;
-}
-#endif
-
 #endif /* FCVVDP_INTERNAL_H */

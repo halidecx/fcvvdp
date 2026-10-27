@@ -90,6 +90,18 @@ sRGB PNG, PNM/PAM, QOI, or Y4M input expected
 
 Library usage is clearly defined in `cvvdp.h`.
 
+### checkasm
+
+[checkasm](https://code.videolan.org/videolan/checkasm) tests the assembly
+functions against the C reference.
+
+```sh
+zig build checkasm -Dcheckasm                             # test
+zig build checkasm -Dcheckasm --release=fast -- --bench   # benchmark
+zig build checkasm -Dcheckasm -- --help                   # more options
+zig build checkasm -Dcheckasm -Dtarget=aarch64-linux -fqemu
+```
+
 ### FFmpeg Patch
 
 0. Clone FFmpeg:
